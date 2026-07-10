@@ -1,0 +1,56 @@
+{
+  "name": "doctarx-nursing-education",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DoctaRx Nursing Education & Clinical Training Platform",
+  "scripts": {
+    "dev": "node server/index.js",
+    "build": "next build",
+    "start": "NODE_ENV=production node server/index.js",
+    "start:win": "set NODE_ENV=production&& node server/index.js",
+    "lint": "eslint .",
+    "test": "cross-env NODE_ENV=test node --test tests/*.test.js",
+    "test:bundle": "node scripts/check-client-bundle.cjs",
+    "migrate": "node server/db/migrate.js",
+    "seed": "node server/scripts/seed-nursing-platform.js",
+    "verify": "npm run lint && npm run test && npm run build"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "overrides": {
+    "postcss": "8.5.16"
+  },
+  "dependencies": {
+    "@radix-ui/react-avatar": "^1.1.11",
+    "@radix-ui/react-label": "^2.1.8",
+    "@radix-ui/react-slot": "^1.2.4",
+    "@tremor/react": "^3.18.7",
+    "bcryptjs": "^3.0.3",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "compression": "^1.8.1",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^17.2.3",
+    "express": "^4.21.2",
+    "express-rate-limit": "^8.2.1",
+    "framer-motion": "^12.42.2",
+    "helmet": "^8.1.0",
+    "lucide-react": "^0.562.0",
+    "next": "^15.5.9",
+    "pg": "^8.16.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwind-merge": "^3.4.0"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.21",
+    "cross-env": "^7.0.3",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "15.5.9",
+    "postcss": "8.5.16",
+    "supertest": "^7.1.4",
+    "tailwindcss": "^3.4.19",
+    "tailwindcss-animate": "^1.0.7"
+  }
+}

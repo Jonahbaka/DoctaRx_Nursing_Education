@@ -1,0 +1,25 @@
+# dependencies and build output
+/node_modules/
+/.next/
+/out/
+/coverage/
+
+# local runtime state
+/.data/
+/.codex/
+*.log
+
+# environment and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# operating system and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
