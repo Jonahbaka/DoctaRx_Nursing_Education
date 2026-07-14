@@ -15,6 +15,9 @@ const ROLE_DASHBOARD_REQUIREMENTS = {
   '/ng/nursing/coordinator': ['clinical_coordinator'],
   '/ng/nursing/supervisor': ['supervisor'],
   '/ng/nursing/admin': ['super_admin', 'institution_admin', 'support_admin'],
+  '/ng/education/medication-notes': ['student'],
+  '/ng/education/medication-quizzes': ['student'],
+  '/ng/education/medication-flashcards': ['student'],
 };
 
 const ROLE_ROUTES = {
@@ -109,5 +112,5 @@ export async function middleware(request) {
 }
 
 export const config = {
-  matcher: ['/ng/nursing/:path*'],
+  matcher: ['/ng/nursing/:path*', '/ng/education/:path*'],
 };

@@ -23,12 +23,15 @@ import {
   GraduationCap,
   Headphones,
   LayoutDashboard,
+  Layers3,
   LogOut,
   Menu,
   MessageCircle,
   MessageSquare,
   Microscope,
+  NotebookPen,
   PlayCircle,
+  Pill,
   Plus,
   Send,
   Search,
@@ -54,6 +57,7 @@ import NursingAnalyticsPanel from '@/components/nursing/NursingAnalyticsPanel';
 import NursingEmptyState from '@/components/nursing/NursingEmptyState';
 import NursingLoadingState from '@/components/nursing/NursingLoadingState';
 import NursingMetricCard from '@/components/nursing/NursingMetricCard';
+import NursingFooter from '@/components/nursing/NursingFooter';
 import NursingSupportCenter from '@/components/nursing/NursingSupportCenter';
 import PaymentStatusCard from '@/components/nursing/PaymentStatusCard';
 import SimulationCaseCard from '@/components/nursing/SimulationCaseCard';
@@ -114,6 +118,13 @@ const moduleTabs = [
   { id: 'reports', label: 'Reports', icon: BarChart3 },
   { id: 'payments', label: 'Payments', icon: CreditCard },
   { id: 'settings', label: 'Settings', icon: Settings },
+];
+
+const medicationEducationNavigation = [
+  { label: 'Medication Library', href: '/ng/education/medications', icon: Pill },
+  { label: 'My Medication Notes', href: '/ng/education/medication-notes', icon: NotebookPen },
+  { label: 'Medication Quizzes', href: '/ng/education/medication-quizzes', icon: ClipboardCheck },
+  { label: 'Medication Flashcards', href: '/ng/education/medication-flashcards', icon: Layers3 },
 ];
 
 const roleDefaultTabs = {
@@ -421,6 +432,7 @@ export function NursingLandingPage() {
           </div>
         </section>
       </section>
+      <NursingFooter />
     </main>
   );
 }
@@ -442,7 +454,13 @@ export function NursingLoginPage() {
         body: { email, password },
       });
       const session = writeSession(response.user);
-      router.push(getAuthorizedRoute(session.user));
+      const requestedRoute = new URLSearchParams(window.location.search).get('next');
+      const safeRequestedRoute = requestedRoute
+        && (requestedRoute.startsWith('/ng/nursing') || requestedRoute.startsWith('/ng/education'))
+        && !requestedRoute.startsWith('//')
+        ? requestedRoute
+        : null;
+      router.push(safeRequestedRoute || getAuthorizedRoute(session.user));
     } catch (requestError) {
       setError(requestError.message || 'Credentials were not recognized.');
     }
@@ -804,6 +822,32 @@ function NursingShell({ role, session, onLogout, activeTab, onTabChange, tabs, n
               </button>
             );
           })}
+          {role === NURSING_ROLES.STUDENT ? (
+            <div className="mt-4 border-t border-white/10 pt-4">
+              <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Medication learning</p>
+              <div className="grid gap-1">
+                {medicationEducationNavigation.map((item) => {
+                  const active = item.href === '/ng/education/medications'
+                    ? pathname === item.href || pathname.startsWith(`${item.href}/`)
+                    : pathname === item.href;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={() => setMobileOpen(false)}
+                      className={cn(
+                        'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition',
+                        active ? 'bg-teal-500 text-slate-950' : 'text-slate-300 hover:bg-white/10 hover:text-white'
+                      )}
+                    >
+                      <item.icon className="h-4 w-4" />
+                      {item.label}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
         </nav>
         {SHOW_ROLE_SWITCHER ? (
           <div className="mt-4 rounded-lg border border-white/10 bg-slate-900/80 p-3">
@@ -865,6 +909,7 @@ function NursingShell({ role, session, onLogout, activeTab, onTabChange, tabs, n
         <main className="px-4 py-6 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-[1500px]">{children}</div>
         </main>
+        <NursingFooter compact />
       </div>
     </div>
   );

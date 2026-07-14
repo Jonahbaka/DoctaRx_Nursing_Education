@@ -16,6 +16,7 @@ function createApiApp() {
   app.use(cookieParser());
   app.use('/api/nursing/auth', rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false }));
   app.use('/api/nursing/access-requests', rateLimit({ windowMs: 60 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false }));
+  app.use('/api/nursing/medications', rateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false }));
   app.use('/api/nursing', nursingRouter);
   app.get('/api/health', async (_req, res) => {
     const database = await healthCheck();

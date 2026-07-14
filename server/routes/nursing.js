@@ -18,6 +18,24 @@ const {
   getRoleDashboard,
 } = require('../../lib/nursingEducationData');
 const { authenticateNursingTestAccount } = require('../services/nursingTestAuth');
+const { dailyMedClient } = require('../services/dailyMedService');
+const {
+  DIFFICULTIES,
+  buildMedicationFlashcards,
+  buildMedicationQuiz,
+  gradeMedicationQuiz,
+  publicMedicationQuiz,
+} = require('../services/medicationLearningEngine');
+const {
+  createMedicationNote,
+  deleteMedicationNote,
+  listMedicationFlashcardProgress,
+  listMedicationNotes,
+  listMedicationQuizAttempts,
+  saveMedicationFlashcardProgress,
+  saveMedicationQuizAttempt,
+  updateMedicationNote,
+} = require('../services/medicationEducationStore');
 
 const router = express.Router();
 const SESSION_COOKIE = 'doctarx_nursing_session';
@@ -25,6 +43,9 @@ const SESSION_MAX_AGE_MS = 8 * 60 * 60 * 1000;
 const SESSION_MAX_AGE_SECONDS = SESSION_MAX_AGE_MS / 1000;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_PATTERN = /^\+?[1-9]\d{7,14}$/;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const FLASHCARD_KEY_PATTERN = /^medcard-[0-9a-f]{20}$/;
 
 const adminRoles = new Set([
   NURSING_ROLES.SUPER_ADMIN,
@@ -277,6 +298,51 @@ function requireSupportRole(req, res, next) {
     return res.status(403).json({ success: false, error: 'Academic support role required' });
   }
   return next();
+}
+
+function requireMedicationStudent(req, res, next) {
+  if (req.nursingUser?.role !== NURSING_ROLES.STUDENT) {
+    return res.status(403).json({
+      success: false,
+      error: 'Medication learning records are available to authenticated nursing students',
+      code: 'MEDICATION_STUDENT_ACCESS_REQUIRED',
+    });
+  }
+  return next();
+}
+
+function requestError(message, code = 'INVALID_REQUEST', statusCode = 400) {
+  const error = new Error(message);
+  error.code = code;
+  error.statusCode = statusCode;
+  return error;
+}
+
+function validatedText(value, label, maximum, { required = false } = {}) {
+  if (value !== undefined && value !== null && typeof value !== 'string') {
+    throw requestError(`${label} must be text`);
+  }
+  const text = String(value || '').replace(/\u0000/g, '').trim();
+  if (required && !text) throw requestError(`${label} is required`);
+  if (text.length > maximum) throw requestError(`${label} cannot exceed ${maximum.toLocaleString()} characters`);
+  return text;
+}
+
+function medicationNoteFields(body) {
+  if (body.confirmNoPatientInfo !== true) {
+    throw requestError(
+      'Confirm that the educational note contains no identifiable patient information',
+      'MEDICATION_NOTE_PRIVACY_CONFIRMATION_REQUIRED'
+    );
+  }
+  return {
+    title: validatedText(body.title, 'Note title', 160, { required: true }),
+    content: validatedText(body.content, 'Note content', 12000),
+    nursingConsiderations: validatedText(body.nursingConsiderations, 'Nursing considerations', 12000),
+    warnings: validatedText(body.warnings, 'Important warnings', 12000),
+    administrationReminders: validatedText(body.administrationReminders, 'Administration reminders', 12000),
+    patientEducation: validatedText(body.patientEducation, 'Patient education points', 12000),
+  };
 }
 
 function validateBodyObject(req, res, next) {
@@ -766,6 +832,178 @@ router.patch('/office-hours/:sessionId', requireNursingSession, requireSupportRo
   return res.json({ success: true, session });
 }));
 
+router.get('/medications/search', requireNursingSession, asyncHandler(async (req, res) => {
+  const searchBy = String(req.query.searchBy || 'generic');
+  if (!['generic', 'brand', 'ingredient'].includes(searchBy)) {
+    return res.status(400).json({ success: false, error: 'Search type must be generic, brand, or ingredient' });
+  }
+  const result = await dailyMedClient.searchMedications({
+    query: req.query.q,
+    searchBy,
+    page: req.query.page,
+    pageSize: req.query.pageSize,
+  });
+  res.set('Cache-Control', 'private, max-age=300');
+  res.set('X-Content-Source', 'NIH DailyMed v2');
+  return res.json({ success: true, ...result });
+}));
+
+router.get('/medications/suggestions', requireNursingSession, asyncHandler(async (req, res) => {
+  const searchBy = String(req.query.searchBy || 'generic');
+  if (!['generic', 'brand', 'ingredient'].includes(searchBy)) {
+    return res.status(400).json({ success: false, error: 'Search type must be generic, brand, or ingredient' });
+  }
+  const suggestions = await dailyMedClient.suggestMedicationNames({
+    query: req.query.q,
+    searchBy,
+    limit: req.query.limit,
+  });
+  res.set('Cache-Control', 'private, max-age=300');
+  res.set('X-Content-Source', 'NIH DailyMed v2');
+  return res.json({ success: true, suggestions });
+}));
+
+router.get('/medications/:setId/flashcards', requireNursingSession, requireMedicationStudent, asyncHandler(async (req, res) => {
+  const setId = dailyMedClient.validateSetId(req.params.setId);
+  const label = await dailyMedClient.getMedicationLabel(setId);
+  const cards = buildMedicationFlashcards(label);
+  return res.json({
+    success: true,
+    medication: { setId: label.setId, medicationName: label.drugName },
+    cards,
+    disclaimer: 'For education only. Verify medication information against current approved guidance and clinical policy.',
+  });
+}));
+
+router.post('/medications/:setId/quizzes', requireNursingSession, requireMedicationStudent, validateBodyObject, asyncHandler(async (req, res) => {
+  const setId = dailyMedClient.validateSetId(req.params.setId);
+  const difficulty = String(req.body.difficulty || 'beginner').toLowerCase();
+  if (!DIFFICULTIES.has(difficulty)) {
+    return res.status(400).json({ success: false, error: 'Difficulty must be beginner, intermediate, or advanced' });
+  }
+  const label = await dailyMedClient.getMedicationLabel(setId);
+  const quiz = buildMedicationQuiz(label, difficulty, crypto.randomUUID());
+  return res.status(201).json({ success: true, quiz: publicMedicationQuiz(quiz) });
+}));
+
+router.get('/medications/:setId', requireNursingSession, asyncHandler(async (req, res) => {
+  const setId = dailyMedClient.validateSetId(req.params.setId);
+  const label = await dailyMedClient.getMedicationLabel(setId);
+  res.set('Cache-Control', 'private, max-age=1800');
+  res.set('X-Content-Source', 'NIH DailyMed v2');
+  return res.json({
+    success: true,
+    medication: label,
+    disclaimer: 'DailyMed content is provided for education and does not replace clinical judgment, local prescribing guidance, or institutional policy.',
+  });
+}));
+
+router.get('/medication-notes', requireNursingSession, requireMedicationStudent, asyncHandler(async (req, res) => {
+  const query = validatedText(req.query.q, 'Medication filter', 100);
+  const dateFrom = req.query.dateFrom ? String(req.query.dateFrom) : null;
+  const dateTo = req.query.dateTo ? String(req.query.dateTo) : null;
+  if ((dateFrom && !DATE_PATTERN.test(dateFrom)) || (dateTo && !DATE_PATTERN.test(dateTo))) {
+    return res.status(400).json({ success: false, error: 'Note dates must use YYYY-MM-DD format' });
+  }
+  const notes = await listMedicationNotes(req.nursingUser, { query, dateFrom, dateTo });
+  return res.json({ success: true, notes });
+}));
+
+router.post('/medication-notes', requireNursingSession, requireMedicationStudent, validateBodyObject, asyncHandler(async (req, res) => {
+  const dailyMedSetId = dailyMedClient.validateSetId(req.body.dailyMedSetId);
+  const fields = medicationNoteFields(req.body);
+  const label = await dailyMedClient.getMedicationLabel(dailyMedSetId);
+  const note = await createMedicationNote(req.nursingUser, {
+    ...fields,
+    dailyMedSetId,
+    medicationName: label.drugName,
+  });
+  return res.status(201).json({ success: true, note });
+}));
+
+router.patch('/medication-notes/:noteId', requireNursingSession, requireMedicationStudent, validateBodyObject, asyncHandler(async (req, res) => {
+  if (!UUID_PATTERN.test(req.params.noteId)) {
+    return res.status(400).json({ success: false, error: 'A valid medication note ID is required' });
+  }
+  const note = await updateMedicationNote(req.nursingUser, req.params.noteId, medicationNoteFields(req.body));
+  if (!note) return res.status(404).json({ success: false, error: 'Medication note not found' });
+  return res.json({ success: true, note });
+}));
+
+router.delete('/medication-notes/:noteId', requireNursingSession, requireMedicationStudent, asyncHandler(async (req, res) => {
+  if (!UUID_PATTERN.test(req.params.noteId)) {
+    return res.status(400).json({ success: false, error: 'A valid medication note ID is required' });
+  }
+  const deleted = await deleteMedicationNote(req.nursingUser, req.params.noteId);
+  if (!deleted) return res.status(404).json({ success: false, error: 'Medication note not found' });
+  return res.json({ success: true });
+}));
+
+router.get('/medication-quizzes/attempts', requireNursingSession, requireMedicationStudent, asyncHandler(async (req, res) => {
+  const setId = req.query.setId ? dailyMedClient.validateSetId(req.query.setId) : null;
+  const attempts = await listMedicationQuizAttempts(req.nursingUser, setId);
+  return res.json({ success: true, attempts });
+}));
+
+router.post('/medication-quizzes/attempts', requireNursingSession, requireMedicationStudent, validateBodyObject, asyncHandler(async (req, res) => {
+  const setId = dailyMedClient.validateSetId(req.body.dailyMedSetId);
+  const difficulty = String(req.body.difficulty || '').toLowerCase();
+  const attemptKey = String(req.body.attemptKey || '');
+  if (!DIFFICULTIES.has(difficulty) || !UUID_PATTERN.test(attemptKey)) {
+    return res.status(400).json({ success: false, error: 'A valid quiz attempt and difficulty are required' });
+  }
+  if (!req.body.answers || typeof req.body.answers !== 'object' || Array.isArray(req.body.answers)) {
+    return res.status(400).json({ success: false, error: 'Quiz answers must be submitted as an object' });
+  }
+  const label = await dailyMedClient.getMedicationLabel(setId);
+  const quiz = buildMedicationQuiz(label, difficulty, attemptKey);
+  const grade = gradeMedicationQuiz(quiz, req.body.answers);
+  const attempt = await saveMedicationQuizAttempt(req.nursingUser, {
+    dailyMedSetId: setId,
+    medicationName: label.drugName,
+    difficulty,
+    score: grade.score,
+    totalQuestions: grade.totalQuestions,
+    answers: grade.results.map((result) => ({
+      questionId: result.questionId,
+      type: result.type,
+      prompt: result.prompt,
+      studentAnswer: result.studentAnswer,
+      correctAnswer: result.correctAnswer,
+      correct: result.correct,
+    })),
+    questionSources: grade.results.map((result) => ({ questionId: result.questionId, source: result.source })),
+  });
+  return res.status(201).json({ success: true, attempt, results: grade.results });
+}));
+
+router.get('/medication-flashcards/progress', requireNursingSession, requireMedicationStudent, asyncHandler(async (req, res) => {
+  const setId = req.query.setId ? dailyMedClient.validateSetId(req.query.setId) : null;
+  const progress = await listMedicationFlashcardProgress(req.nursingUser, setId);
+  return res.json({ success: true, progress });
+}));
+
+router.put('/medication-flashcards/progress', requireNursingSession, requireMedicationStudent, validateBodyObject, asyncHandler(async (req, res) => {
+  const dailyMedSetId = dailyMedClient.validateSetId(req.body.dailyMedSetId);
+  const cardKey = String(req.body.cardKey || '');
+  const status = String(req.body.status || '');
+  if (!FLASHCARD_KEY_PATTERN.test(cardKey) || !['know_it', 'review_again'].includes(status)) {
+    return res.status(400).json({ success: false, error: 'A valid flashcard and review status are required' });
+  }
+  const label = await dailyMedClient.getMedicationLabel(dailyMedSetId);
+  const validCard = buildMedicationFlashcards(label).some((card) => card.cardKey === cardKey);
+  if (!validCard) {
+    return res.status(400).json({ success: false, error: 'The flashcard does not belong to the selected medication label' });
+  }
+  const progress = await saveMedicationFlashcardProgress(req.nursingUser, {
+    dailyMedSetId,
+    medicationName: label.drugName,
+    cardKey,
+    status,
+  });
+  return res.json({ success: true, progress });
+}));
+
 router.get('/:resource', requireNursingSession, asyncHandler(async (req, res) => {
   const resource = String(req.params.resource || '');
   const key = resourceMap[resource];
@@ -1016,9 +1254,11 @@ router.post('/certificates', requireNursingSession, requirePermission('issueCert
 
 router.use((error, _req, res, _next) => {
   if (process.env.NODE_ENV !== 'test') console.error('Nursing API error:', error.message);
+  if (error.retryAfterSeconds) res.set('Retry-After', String(error.retryAfterSeconds));
   return res.status(error.statusCode || 500).json({
     success: false,
     error: error.statusCode ? error.message : 'The nursing platform could not complete this request',
+    ...(error.code ? { code: error.code } : {}),
   });
 });
 

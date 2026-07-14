@@ -10,6 +10,7 @@ DoctaRx Nursing Education is a standalone nursing learning, clinical training, a
 - Simulation cases, telehealth documentation practice, and clinical logbook reviews
 - Certificates, payment-access verification, reporting, and audit events
 - Persisted messages, academic support waiting rooms, escalations, and office hours
+- NIH DailyMed medication labels, private study notes, grounded quizzes, and flashcards
 - Responsive public, student, academic staff, and administration interfaces
 
 ## Local Setup
@@ -71,4 +72,5 @@ npm run test:bundle
 - [Feature test report](docs/nursing-platform-feature-test-report.md)
 - [Final feature check](docs/nursing-platform-final-feature-check.md)
 - [Architecture](docs/nursing-platform-architecture.md)
+- [DailyMed medication education module](docs/dailymed-medication-education.md)
 - [QA account credentials](docs/nursing-platform-demo-credentials.md)

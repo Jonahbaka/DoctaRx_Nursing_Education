@@ -41,6 +41,9 @@ function defaultState() {
     officeHourNotes: [],
     supportEscalations: [],
     adminSupportProfiles: [],
+    medicationNotes: [],
+    medicationQuizAttempts: [],
+    medicationFlashcardProgress: [],
     messageThreads: [
       { id: 'announcements', title: 'Department announcements', scope: 'department', status: 'open' },
       { id: 'course-discussions', title: 'Course Q&A', scope: 'department', status: 'open' },

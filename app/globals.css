@@ -77,3 +77,71 @@
     @apply border border-white/15 bg-slate-950/70 text-white shadow-2xl backdrop-blur-xl;
   }
 }
+
+@layer components {
+  .medication-label-content {
+    overflow-x: auto;
+    color: #334155;
+    font-size: 0.9375rem;
+    line-height: 1.75;
+  }
+
+  .medication-label-content p {
+    margin: 0.75rem 0;
+  }
+
+  .medication-label-content h4,
+  .medication-label-content h5 {
+    margin: 1.25rem 0 0.5rem;
+    color: #0f172a;
+    font-weight: 700;
+    letter-spacing: 0;
+  }
+
+  .medication-label-content ul,
+  .medication-label-content ol {
+    margin: 0.75rem 0;
+    padding-left: 1.5rem;
+  }
+
+  .medication-label-content ul {
+    list-style: disc;
+  }
+
+  .medication-label-content ol {
+    list-style: decimal;
+  }
+
+  .medication-label-content li {
+    margin: 0.35rem 0;
+  }
+
+  .medication-label-content table {
+    margin: 1rem 0;
+    min-width: 640px;
+    width: 100%;
+    border-collapse: collapse;
+    background: #ffffff;
+  }
+
+  .medication-label-content th,
+  .medication-label-content td {
+    border: 1px solid #cbd5e1;
+    padding: 0.625rem;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .medication-label-content th {
+    background: #f1f5f9;
+    color: #0f172a;
+    font-weight: 700;
+  }
+
+  .medication-label-content a {
+    color: #0f766e;
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 0.2rem;
+  }
+}
