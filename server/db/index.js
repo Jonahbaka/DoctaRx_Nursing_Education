@@ -55,4 +55,8 @@ async function healthCheck() {
   }
 }
 
-module.exports = { pool, query, getClient, transaction, healthCheck };
+async function close() {
+  if (pool) await pool.end();
+}
+
+module.exports = { pool, query, getClient, transaction, healthCheck, close };

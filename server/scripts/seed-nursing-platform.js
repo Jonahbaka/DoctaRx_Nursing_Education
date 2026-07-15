@@ -13,7 +13,7 @@ const { getNursingMetrics, getNursingSeedData } = require('../../lib/nursingEduc
 
 const seed = getNursingSeedData();
 const metrics = getNursingMetrics();
-const TEST_ACCOUNT_PASSWORD = process.env.NURSING_TEST_ACCOUNT_PASSWORD || 'DemoPass!2026';
+const TEST_ACCOUNT_PASSWORD = process.env.NURSING_TEST_ACCOUNT_PASSWORD;
 
 function uuidFromKey(key) {
   const hash = crypto.createHash('sha1').update(`doctarx-nursing:${key}`).digest();
@@ -33,6 +33,10 @@ function json(value) {
 }
 
 async function run() {
+  if (!TEST_ACCOUNT_PASSWORD || TEST_ACCOUNT_PASSWORD.length < 12) {
+    throw new Error('NURSING_TEST_ACCOUNT_PASSWORD is required and must contain at least 12 characters');
+  }
+
   const client = await db.getClient();
   const passwordHash = await bcrypt.hash(TEST_ACCOUNT_PASSWORD, 10);
 
@@ -1199,9 +1203,9 @@ async function run() {
     );
 
     await client.query('COMMIT');
-    console.log('Nursing education platform demo seed complete.');
-    console.log(`Demo users: ${seed.users.length}; courses: ${seed.courses.length}; simulations: ${seed.simulationCases.length}`);
-    console.log('Credentials are documented in docs/nursing-platform-demo-credentials.md.');
+    console.log('Nursing education pilot seed complete.');
+    console.log(`Pilot accounts: ${seed.users.length}; courses: ${seed.courses.length}; simulations: ${seed.simulationCases.length}`);
+    console.log('Pilot credentials are managed through NURSING_TEST_ACCOUNT_PASSWORD.');
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Nursing education seed failed:', error.message);
@@ -1212,4 +1216,7 @@ async function run() {
   }
 }
 
-run();
+run().catch((error) => {
+  console.error('Nursing education seed failed:', error.message);
+  process.exitCode = 1;
+});

@@ -54,6 +54,18 @@ test('seed covers all roles, course, clinical, evidence, and reporting domains',
   assert.ok(seed.reports.length >= 3);
 });
 
+test('database shutdown is explicit and the production seed has no fallback password', () => {
+  const db = require('../server/db');
+  const seedScript = fs.readFileSync(
+    path.join(__dirname, '../server/scripts/seed-nursing-platform.js'),
+    'utf8'
+  );
+
+  assert.equal(typeof db.close, 'function');
+  assert.match(seedScript, /NURSING_TEST_ACCOUNT_PASSWORD is required/);
+  assert.doesNotMatch(seedScript, /DemoPass!2026/);
+});
+
 test('role permissions and dashboard metrics remain role-specific', () => {
   assert.equal(canNursingRole(NURSING_ROLES.STUDENT, 'manageCourses'), false);
   assert.equal(canNursingRole(NURSING_ROLES.LECTURER, 'manageCourses'), true);
