@@ -1,9 +1,12 @@
+const assetPrefix = process.env.NEXT_PUBLIC_ASSET_PREFIX?.trim() || undefined;
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   compress: true,
   outputFileTracingRoot: __dirname,
+  assetPrefix,
   async headers() {
     return [
       {
