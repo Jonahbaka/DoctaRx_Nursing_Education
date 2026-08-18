@@ -395,6 +395,122 @@ function publicUser(user) {
   return safeUser;
 }
 
+function visibleMessages(state, user) {
+  return (state.messages || []).filter((message) => (
+    message.scope === 'department' ||
+    message.senderId === user.id ||
+    message.recipientId === user.id ||
+    (Array.isArray(message.participantIds) && message.participantIds.includes(user.id))
+  ));
+}
+
+function redactQuizAnswers(quiz) {
+  return {
+    ...quiz,
+    questions: (quiz.questions || []).map((question) => {
+      const publicQuestion = { ...question };
+      delete publicQuestion.correctIndex;
+      delete publicQuestion.correctAnswer;
+      delete publicQuestion.answer;
+      delete publicQuestion.explanation;
+      return publicQuestion;
+    }),
+  };
+}
+
+function redactSimulationAnswers(simulationCase) {
+  const publicCase = { ...simulationCase };
+  delete publicCase.expectedActions;
+  delete publicCase.feedback;
+  delete publicCase.score;
+  delete publicCase.rubric;
+  delete publicCase.scoringRubric;
+  return publicCase;
+}
+
+function visibleResourceData(resource, data, user) {
+  if (!Array.isArray(data)) return data;
+  const isStudent = user.role === NURSING_ROLES.STUDENT;
+  if (!isStudent) {
+    if (resource === 'users') return data.map(publicUser);
+    return data;
+  }
+
+  const ownRecordKeys = {
+    enrollments: ['studentId'],
+    progress: ['studentId'],
+    grades: ['studentId'],
+    notifications: ['userId'],
+    'telehealth-lab': ['studentId', 'userId'],
+    logbook: ['studentId'],
+    certificates: ['studentId'],
+    payments: ['studentId'],
+  };
+  if (resource === 'users') return data.filter((item) => item.id === user.id).map(publicUser);
+  if (resource === 'profiles') return data.filter((item) => item.userId === user.id);
+  if (resource === 'quizzes') return data.map(redactQuizAnswers);
+  if (resource === 'simulations') return data.map(redactSimulationAnswers);
+  if (ownRecordKeys[resource]) {
+    return data.filter((item) => ownRecordKeys[resource].some((key) => item[key] === user.id));
+  }
+  return data;
+}
+
+function bootstrapStateForUser(state, user) {
+  const visible = JSON.parse(JSON.stringify(state));
+  delete visible.auditEvents;
+
+  visible.messages = visibleMessages(visible, user);
+  visible.users = visibleResourceData('users', visible.users || [], user);
+  visible.userProfiles = visibleResourceData('profiles', visible.userProfiles || [], user);
+  visible.quizzes = visibleResourceData('quizzes', visible.quizzes || [], user);
+  visible.simulationCases = visibleResourceData('simulations', visible.simulationCases || [], user);
+
+  if (user.role === NURSING_ROLES.STUDENT) {
+    const own = (collection, ...keys) => (visible[collection] || []).filter(
+      (item) => keys.some((key) => item[key] === user.id)
+    );
+    visible.courseEnrollments = own('courseEnrollments', 'studentId');
+    visible.lessonProgress = own('lessonProgress', 'studentId');
+    visible.assignmentSubmissions = own('assignmentSubmissions', 'studentId');
+    visible.grades = own('grades', 'studentId');
+    visible.gradeComments = (visible.gradeComments || []).filter((comment) => (
+      visible.grades.some((grade) => grade.id === comment.gradeId)
+    ));
+    visible.quizAttempts = own('quizAttempts', 'studentId');
+    visible.simulationAttempts = own('simulationAttempts', 'studentId');
+    visible.telehealthLabSessions = own('telehealthLabSessions', 'studentId', 'userId');
+    visible.telehealthLabNotes = own('telehealthLabNotes', 'studentId', 'userId');
+    visible.logbookEntries = own('logbookEntries', 'studentId');
+    visible.supervisorReviews = (visible.supervisorReviews || []).filter((review) => (
+      visible.logbookEntries.some((entry) => entry.id === review.entryId)
+    ));
+    visible.certificates = own('certificates', 'studentId');
+    visible.paymentRecords = own('paymentRecords', 'studentId');
+    visible.notifications = own('notifications', 'userId');
+    visible.waitingRoomQueue = own('waitingRoomQueue', 'studentId');
+    const joinedRoomIds = new Set(visible.waitingRoomQueue.map((entry) => entry.roomId));
+    visible.waitingRoomMessages = (visible.waitingRoomMessages || []).filter((message) => (
+      joinedRoomIds.has(message.roomId) && message.visibility !== 'internal'
+    ));
+    visible.accessRequests = [];
+    visible.reports = [];
+
+    visible.courses = (visible.courses || []).filter((course) => course.status === 'published');
+    const visibleCourseIds = new Set(visible.courses.map((course) => course.id));
+    visible.courseSections = (visible.courseSections || []).filter((section) => (
+      visibleCourseIds.has(section.courseId) && section.status !== 'draft'
+    ));
+    visible.lessons = (visible.lessons || []).filter((lesson) => (
+      visibleCourseIds.has(lesson.courseId) && !['draft', 'unpublished'].includes(lesson.status)
+    ));
+  } else if (!adminRoles.has(user.role)) {
+    visible.accessRequests = [];
+  }
+
+  return visible;
+}
+
 router.post('/auth/login', validateBodyObject, asyncHandler(async (req, res) => {
   const email = String(req.body.email || '').trim().toLowerCase();
   const password = String(req.body.password || '');
@@ -462,18 +578,12 @@ router.get('/metrics', requireNursingSession, requirePermission('viewReports'), 
 
 router.get('/bootstrap', requireNursingSession, asyncHandler(async (req, res) => {
   const state = await readState(tenantKeyForUser(req.nursingUser));
-  delete state.auditEvents;
-  return res.json({ success: true, state });
+  return res.json({ success: true, state: bootstrapStateForUser(state, req.nursingUser) });
 }));
 
 router.get('/messages', requireNursingSession, asyncHandler(async (req, res) => {
   const state = await readState(tenantKeyForUser(req.nursingUser));
-  const messages = state.messages.filter((message) => (
-    message.scope === 'department' ||
-    message.senderId === req.nursingUser.id ||
-    message.recipientId === req.nursingUser.id ||
-    (Array.isArray(message.participantIds) && message.participantIds.includes(req.nursingUser.id))
-  ));
+  const messages = visibleMessages(state, req.nursingUser);
   return res.json({ success: true, threads: state.messageThreads, messages });
 }));
 
@@ -481,14 +591,26 @@ router.post('/messages', requireNursingSession, validateBodyObject, asyncHandler
   const body = String(req.body.body || '').trim();
   const threadId = String(req.body.threadId || '').trim();
   if (!body || !threadId) return res.status(400).json({ success: false, error: 'Message and thread are required' });
+  const state = await readState(tenantKeyForUser(req.nursingUser));
+  const thread = state.messageThreads.find((item) => item.id === threadId && item.status === 'open');
+  if (!thread) return res.status(404).json({ success: false, error: 'Message thread was not found' });
+  const scope = req.body.scope === 'user' ? 'user' : 'department';
+  const recipientId = scope === 'user' ? String(req.body.recipientId || '') : null;
+  if (scope === 'user' && (
+    !recipientId ||
+    recipientId === req.nursingUser.id ||
+    !state.users.some((user) => user.id === recipientId && user.status === 'active')
+  )) {
+    return res.status(400).json({ success: false, error: 'Select an active recipient in your institution' });
+  }
   const message = {
     id: `message-${crypto.randomUUID()}`,
     threadId: threadId.slice(0, 160),
     senderId: req.nursingUser.id,
     senderName: `${req.nursingUser.firstName} ${req.nursingUser.lastName}`,
-    recipientId: req.body.recipientId || null,
-    participantIds: Array.isArray(req.body.participantIds) ? req.body.participantIds.slice(0, 50) : [],
-    scope: req.body.scope === 'user' ? 'user' : 'department',
+    recipientId,
+    participantIds: recipientId ? [req.nursingUser.id, recipientId] : [],
+    scope,
     body: body.slice(0, 5000),
     status: 'sent',
     readBy: [req.nursingUser.id],
@@ -1011,8 +1133,12 @@ router.get('/:resource', requireNursingSession, asyncHandler(async (req, res) =>
   if (resource === 'access-requests' && !adminRoles.has(req.nursingUser.role)) {
     return res.status(403).json({ success: false, error: 'Access request administration requires an admin role' });
   }
+  if (resource === 'reports' && !canNursingRole(req.nursingUser.role, 'viewReports')) {
+    return res.status(403).json({ success: false, error: 'Report access requires reporting permission' });
+  }
   const state = await readState(tenantKeyForUser(req.nursingUser));
-  const data = key === 'institution' ? state.institution : state[key];
+  const rawData = key === 'institution' ? state.institution : state[key];
+  const data = visibleResourceData(resource, rawData, req.nursingUser);
   const responseKey = resource.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
   return res.json({ success: true, [responseKey]: data });
 }));
