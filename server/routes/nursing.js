@@ -36,6 +36,20 @@ const {
   saveMedicationQuizAttempt,
   updateMedicationNote,
 } = require('../services/medicationEducationStore');
+const { answerNursingQuestion } = require('../services/nursingAssistantService');
+const {
+  authorizeStoredObject,
+  completeUpload,
+  createUploadIntent,
+  initializeInstitutionBilling,
+  issueCertificatePdf,
+  liveKitToken,
+  messageEvents,
+  recordMessageEvent,
+  reportOperationalAlert,
+  revokeCertificate,
+  verifyCertificate,
+} = require('../services/productionIntegrations');
 
 const router = express.Router();
 const SESSION_COOKIE = 'doctarx_nursing_session';
@@ -46,6 +60,7 @@ const PHONE_PATTERN = /^\+?[1-9]\d{7,14}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const FLASHCARD_KEY_PATTERN = /^medcard-[0-9a-f]{20}$/;
+const VERIFICATION_CODE_PATTERN = /^DRX-NUR-[A-F0-9]{16}$/;
 
 const adminRoles = new Set([
   NURSING_ROLES.SUPER_ADMIN,
@@ -397,10 +412,25 @@ function publicUser(user) {
 
 function visibleMessages(state, user) {
   return (state.messages || []).filter((message) => (
-    message.scope === 'department' ||
+    (message.scope === 'department' && message.departmentId && message.departmentId === user.departmentId) ||
     message.senderId === user.id ||
     message.recipientId === user.id ||
     (Array.isArray(message.participantIds) && message.participantIds.includes(user.id))
+  ));
+}
+
+function mayManageCourse(course, user) {
+  if (!course || !user) return false;
+  if ([NURSING_ROLES.SUPER_ADMIN, NURSING_ROLES.INSTITUTION_ADMIN, NURSING_ROLES.HOD, NURSING_ROLES.SUPPORT_ADMIN].includes(user.role)) return true;
+  return user.role === NURSING_ROLES.LECTURER && course.lecturerId === user.id;
+}
+
+function hasCourseAccess(state, user, courseId) {
+  const course = (state.courses || []).find((item) => item.id === courseId);
+  if (!course) return false;
+  if (user.role !== NURSING_ROLES.STUDENT) return mayManageCourse(course, user) || supportRoles.has(user.role);
+  return ['active', 'published'].includes(course.status) && (state.courseEnrollments || []).some((item) => (
+    item.studentId === user.id && item.courseId === courseId && !['withdrawn', 'suspended'].includes(item.status)
   ));
 }
 
@@ -461,6 +491,8 @@ function bootstrapStateForUser(state, user) {
   delete visible.auditEvents;
 
   visible.messages = visibleMessages(visible, user);
+  const visibleThreadIds = new Set(visible.messages.map((message) => message.threadId));
+  visible.messageThreads = (visible.messageThreads || []).filter((thread) => visibleThreadIds.has(thread.id));
   visible.users = visibleResourceData('users', visible.users || [], user);
   visible.userProfiles = visibleResourceData('profiles', visible.userProfiles || [], user);
   visible.quizzes = visibleResourceData('quizzes', visible.quizzes || [], user);
@@ -488,6 +520,10 @@ function bootstrapStateForUser(state, user) {
     visible.certificates = own('certificates', 'studentId');
     visible.paymentRecords = own('paymentRecords', 'studentId');
     visible.notifications = own('notifications', 'userId');
+    visible.learnerActivities = own('learnerActivities', 'studentId');
+    visible.courseReviews = (visible.courseReviews || []).filter((review) => (
+      review.studentId === user.id || review.status === 'published'
+    ));
     visible.waitingRoomQueue = own('waitingRoomQueue', 'studentId');
     const joinedRoomIds = new Set(visible.waitingRoomQueue.map((entry) => entry.roomId));
     visible.waitingRoomMessages = (visible.waitingRoomMessages || []).filter((message) => (
@@ -496,8 +532,8 @@ function bootstrapStateForUser(state, user) {
     visible.accessRequests = [];
     visible.reports = [];
 
-    visible.courses = (visible.courses || []).filter((course) => course.status === 'published');
-    const visibleCourseIds = new Set(visible.courses.map((course) => course.id));
+    visible.courses = (visible.courses || []).filter((course) => ['active', 'published'].includes(course.status));
+    const visibleCourseIds = new Set(visible.courseEnrollments.map((enrollment) => enrollment.courseId));
     visible.courseSections = (visible.courseSections || []).filter((section) => (
       visibleCourseIds.has(section.courseId) && section.status !== 'draft'
     ));
@@ -528,6 +564,14 @@ router.post('/auth/logout', (_req, res) => {
   clearSessionCookie(res);
   return res.json({ success: true });
 });
+
+router.get('/certificates/verify/:code', asyncHandler(async (req, res) => {
+  const code = String(req.params.code || '').toUpperCase();
+  if (!VERIFICATION_CODE_PATTERN.test(code)) {
+    return res.status(400).json({ success: false, error: 'A valid certificate verification code is required' });
+  }
+  return res.json({ success: true, verification: await verifyCertificate(code) });
+}));
 
 router.post('/access-requests', validateBodyObject, asyncHandler(async (req, res) => {
   const fullName = String(req.body.fullName || '').trim();
@@ -584,7 +628,46 @@ router.get('/bootstrap', requireNursingSession, asyncHandler(async (req, res) =>
 router.get('/messages', requireNursingSession, asyncHandler(async (req, res) => {
   const state = await readState(tenantKeyForUser(req.nursingUser));
   const messages = visibleMessages(state, req.nursingUser);
-  return res.json({ success: true, threads: state.messageThreads, messages });
+  const threadIds = new Set(messages.map((message) => message.threadId));
+  return res.json({ success: true, threads: (state.messageThreads || []).filter((thread) => threadIds.has(thread.id)), messages });
+}));
+
+router.get('/messages/events', requireNursingSession, asyncHandler(async (req, res) => {
+  if (!pool) return res.json({ success: true, events: [], transport: 'memory-test' });
+  const events = await messageEvents(tenantKeyForUser(req.nursingUser), req.query.after, req.query.limit);
+  return res.json({ success: true, events, transport: 'ordered-postgresql' });
+}));
+
+router.get('/messages/stream', requireNursingSession, asyncHandler(async (req, res) => {
+  if (!pool) return res.status(503).json({ success: false, error: 'Reliable message streaming requires PostgreSQL' });
+  let cursor = Number(req.get('Last-Event-ID') || req.query.after || 0) || 0;
+  let closed = false;
+  res.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.flushHeaders();
+  res.write('retry: 3000\n\n');
+  req.on('close', () => { closed = true; });
+
+  async function publish() {
+    if (closed) return;
+    try {
+      const events = await messageEvents(tenantKeyForUser(req.nursingUser), cursor, 100);
+      for (const event of events) {
+        cursor = Number(event.sequence_number);
+        res.write(`id: ${cursor}\nevent: message-status\ndata: ${JSON.stringify(event)}\n\n`);
+      }
+      if (!events.length) res.write(`: heartbeat ${Date.now()}\n\n`);
+    } catch (error) {
+      res.write(`event: stream-error\ndata: ${JSON.stringify({ retryable: true })}\n\n`);
+      if (process.env.NODE_ENV !== 'test') console.error('Nursing message stream error:', error.message);
+    }
+    if (!closed) setTimeout(publish, 2000).unref();
+  }
+  await publish();
 }));
 
 router.post('/messages', requireNursingSession, validateBodyObject, asyncHandler(async (req, res) => {
@@ -611,12 +694,33 @@ router.post('/messages', requireNursingSession, validateBodyObject, asyncHandler
     recipientId,
     participantIds: recipientId ? [req.nursingUser.id, recipientId] : [],
     scope,
+    departmentId: req.nursingUser.departmentId,
     body: body.slice(0, 5000),
     status: 'sent',
     readBy: [req.nursingUser.id],
     createdAt: new Date().toISOString(),
   };
-  return res.status(201).json({ success: true, message: await appendEntity(req, 'messages', message, 'send', 'nursing_message') });
+  const saved = await appendEntity(req, 'messages', message, 'send', 'nursing_message');
+  if (pool) {
+    await recordMessageEvent(tenantKeyForUser(req.nursingUser), saved.id, 'created', req.nursingUser.id, { threadId: saved.threadId });
+    await recordMessageEvent(tenantKeyForUser(req.nursingUser), saved.id, 'delivered', req.nursingUser.id, { scope: saved.scope });
+  }
+  return res.status(201).json({ success: true, message: saved });
+}));
+
+router.patch('/messages/:messageId/read', requireNursingSession, asyncHandler(async (req, res) => {
+  const message = await mutateState(tenantKeyForUser(req.nursingUser), (state) => {
+    const index = state.messages.findIndex((item) => item.id === req.params.messageId);
+    if (index < 0 || !visibleMessages(state, req.nursingUser).some((item) => item.id === req.params.messageId)) {
+      throw requestError('Message was not found', 'MESSAGE_NOT_FOUND', 404);
+    }
+    const readBy = new Set(state.messages[index].readBy || []);
+    readBy.add(req.nursingUser.id);
+    state.messages[index] = { ...state.messages[index], readBy: [...readBy], readAt: new Date().toISOString() };
+    return state.messages[index];
+  });
+  if (pool) await recordMessageEvent(tenantKeyForUser(req.nursingUser), message.id, 'read', req.nursingUser.id);
+  return res.json({ success: true, message });
 }));
 
 router.get('/profiles/:userId', requireNursingSession, asyncHandler(async (req, res) => {
@@ -910,6 +1014,17 @@ router.post('/office-hours/:sessionId/join', requireNursingSession, asyncHandler
   return res.status(201).json({ success: true, attendance });
 }));
 
+router.post('/office-hours/:sessionId/video-token', requireNursingSession, asyncHandler(async (req, res) => {
+  const state = await readState(tenantKeyForUser(req.nursingUser));
+  const session = (state.officeHourSessions || []).find((item) => item.id === req.params.sessionId && !['closed', 'cancelled'].includes(item.status));
+  if (!session) return res.status(404).json({ success: false, error: 'Office-hour session is not available' });
+  const mayJoin = session.hostId === req.nursingUser.id || supportRoles.has(req.nursingUser.role) ||
+    (state.officeHourAttendance || []).some((item) => item.sessionId === session.id && item.userId === req.nursingUser.id && item.status !== 'cancelled');
+  if (!mayJoin) return res.status(403).json({ success: false, error: 'Join the office-hour session before requesting video access' });
+  const roomName = `nursing-${req.nursingUser.institutionId}-${session.id}`.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 180);
+  return res.json({ success: true, video: liveKitToken(req.nursingUser, roomName) });
+}));
+
 router.post('/office-hours/:sessionId/questions', requireNursingSession, validateBodyObject, asyncHandler(async (req, res) => {
   const questionText = String(req.body.question || '').trim();
   if (questionText.length < 5) return res.status(400).json({ success: false, error: 'Question must contain at least five characters' });
@@ -1126,6 +1241,127 @@ router.put('/medication-flashcards/progress', requireNursingSession, requireMedi
   return res.json({ success: true, progress });
 }));
 
+router.get('/catalogue', requireNursingSession, asyncHandler(async (req, res) => {
+  const state = await readState(tenantKeyForUser(req.nursingUser));
+  const query = String(req.query.q || '').trim().toLowerCase();
+  const category = String(req.query.category || '').trim().toLowerCase();
+  const level = String(req.query.level || '').trim().toLowerCase();
+  const allowedStatuses = req.nursingUser.role === NURSING_ROLES.STUDENT
+    ? new Set(['active', 'published'])
+    : new Set(['active', 'published', 'draft']);
+  const courses = (state.courses || []).filter((course) => {
+    const haystack = [course.code, course.title, course.description, course.category, course.level, ...(course.learningObjectives || [])].join(' ').toLowerCase();
+    return allowedStatuses.has(course.status) && (!query || haystack.includes(query)) &&
+      (!category || String(course.category || '').toLowerCase() === category) &&
+      (!level || String(course.level || '').toLowerCase() === level);
+  });
+  return res.json({
+    success: true,
+    courses,
+    filters: {
+      categories: [...new Set((state.courses || []).map((course) => course.category).filter(Boolean))].sort(),
+      levels: [...new Set((state.courses || []).map((course) => course.level).filter(Boolean))].sort(),
+    },
+  });
+}));
+
+router.get('/learning-paths', requireNursingSession, asyncHandler(async (req, res) => {
+  const state = await readState(tenantKeyForUser(req.nursingUser));
+  const enrollmentIds = new Set((state.courseEnrollments || [])
+    .filter((item) => req.nursingUser.role !== NURSING_ROLES.STUDENT || item.studentId === req.nursingUser.id)
+    .map((item) => item.courseId));
+  const configured = (state.learningPaths || []).filter((path) => (
+    req.nursingUser.role !== NURSING_ROLES.STUDENT || (path.courseIds || []).some((id) => enrollmentIds.has(id))
+  ));
+  const paths = configured.length ? configured : [...new Set((state.courses || []).map((course) => course.category).filter(Boolean))]
+    .map((category, index) => ({
+      id: `path-${index + 1}`,
+      title: `${category} learning path`,
+      description: `A sequenced pathway through the available ${category.toLowerCase()} courses.`,
+      courseIds: (state.courses || []).filter((course) => course.category === category && (req.nursingUser.role !== NURSING_ROLES.STUDENT || enrollmentIds.has(course.id))).map((course) => course.id),
+    })).filter((path) => path.courseIds.length);
+  return res.json({ success: true, paths });
+}));
+
+router.get('/courses/:courseId/details', requireNursingSession, asyncHandler(async (req, res) => {
+  const state = await readState(tenantKeyForUser(req.nursingUser));
+  const course = (state.courses || []).find((item) => item.id === req.params.courseId);
+  if (!course || (req.nursingUser.role === NURSING_ROLES.STUDENT && !['active', 'published'].includes(course.status))) {
+    return res.status(404).json({ success: false, error: 'Course was not found' });
+  }
+  const enrolled = req.nursingUser.role !== NURSING_ROLES.STUDENT || hasCourseAccess(state, req.nursingUser, course.id);
+  const sections = (state.courseSections || []).filter((item) => item.courseId === course.id && (req.nursingUser.role !== NURSING_ROLES.STUDENT || item.status !== 'draft'));
+  let lessons = (state.lessons || []).filter((item) => item.courseId === course.id && (req.nursingUser.role !== NURSING_ROLES.STUDENT || !['draft', 'unpublished'].includes(item.status || item.materialStatus)));
+  if (!enrolled) lessons = lessons.slice(0, 1).map((lesson) => ({ id: lesson.id, courseId: lesson.courseId, title: lesson.title, description: lesson.description, contentType: lesson.contentType, estimatedMinutes: lesson.estimatedMinutes, preview: true }));
+  const reviews = (state.courseReviews || []).filter((item) => item.courseId === course.id && (item.status === 'published' || item.studentId === req.nursingUser.id));
+  return res.json({ success: true, course, sections, lessons, reviews, enrolled });
+}));
+
+router.put('/lessons/:lessonId/engagement', requireNursingSession, requirePermission('completeLesson'), validateBodyObject, asyncHandler(async (req, res) => {
+  const activity = await mutateState(tenantKeyForUser(req.nursingUser), (state) => {
+    const lesson = (state.lessons || []).find((item) => item.id === req.params.lessonId);
+    if (!lesson) throw requestError('Lesson was not found', 'LESSON_NOT_FOUND', 404);
+    const enrolled = (state.courseEnrollments || []).some((item) => item.studentId === req.nursingUser.id && item.courseId === lesson.courseId);
+    if (!enrolled) throw requestError('Lesson access requires an active course enrollment', 'LESSON_ACCESS_DENIED', 403);
+    if (!Array.isArray(state.learnerActivities)) state.learnerActivities = [];
+    const id = `activity-${req.nursingUser.id}-${lesson.id}`;
+    const index = state.learnerActivities.findIndex((item) => item.id === id);
+    const next = {
+      id,
+      studentId: req.nursingUser.id,
+      courseId: lesson.courseId,
+      lessonId: lesson.id,
+      bookmarked: req.body.bookmarked === undefined ? Boolean(state.learnerActivities[index]?.bookmarked) : Boolean(req.body.bookmarked),
+      note: validatedText(req.body.note, 'Lesson note', 12000),
+      resumeSeconds: Math.max(0, Math.floor(Number(req.body.resumeSeconds || 0))),
+      progressPercent: Math.min(100, Math.max(0, Number(req.body.progressPercent || 0))),
+      updatedAt: new Date().toISOString(),
+    };
+    if (index >= 0) state.learnerActivities[index] = next;
+    else state.learnerActivities.unshift(next);
+    state.auditEvents.unshift(auditEvent(req, 'update', 'nursing_lesson_engagement', lesson.id));
+    return next;
+  });
+  return res.json({ success: true, activity });
+}));
+
+router.post('/courses/:courseId/reviews', requireNursingSession, requirePermission('takeCourse'), validateBodyObject, asyncHandler(async (req, res) => {
+  const rating = Number(req.body.rating);
+  const reviewText = validatedText(req.body.review, 'Review', 2000, { required: true });
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) return res.status(422).json({ success: false, error: 'Rating must be between one and five' });
+  const review = await mutateState(tenantKeyForUser(req.nursingUser), (state) => {
+    if (!(state.courseEnrollments || []).some((item) => item.studentId === req.nursingUser.id && item.courseId === req.params.courseId)) {
+      throw requestError('Only enrolled students can review this course', 'COURSE_REVIEW_ACCESS_DENIED', 403);
+    }
+    if (!Array.isArray(state.courseReviews)) state.courseReviews = [];
+    const existing = state.courseReviews.findIndex((item) => item.studentId === req.nursingUser.id && item.courseId === req.params.courseId);
+    const next = { id: existing >= 0 ? state.courseReviews[existing].id : `review-${crypto.randomUUID()}`, courseId: req.params.courseId, studentId: req.nursingUser.id, rating, review: reviewText, status: 'pending', updatedAt: new Date().toISOString() };
+    if (existing >= 0) state.courseReviews[existing] = next;
+    else state.courseReviews.unshift(next);
+    state.auditEvents.unshift(auditEvent(req, 'submit', 'nursing_course_review', next.id));
+    return next;
+  });
+  return res.status(201).json({ success: true, review });
+}));
+
+router.patch('/courses/:courseId/reviews/:reviewId', requireNursingSession, requirePermission('manageCourses'), validateBodyObject, asyncHandler(async (req, res) => {
+  const status = ['published', 'rejected', 'pending'].includes(req.body.status) ? req.body.status : null;
+  if (!status) return res.status(422).json({ success: false, error: 'A valid moderation status is required' });
+  const review = await mutateState(tenantKeyForUser(req.nursingUser), (state) => {
+    const index = (state.courseReviews || []).findIndex((item) => item.id === req.params.reviewId && item.courseId === req.params.courseId);
+    if (index < 0) throw requestError('Course review was not found', 'COURSE_REVIEW_NOT_FOUND', 404);
+    state.courseReviews[index] = { ...state.courseReviews[index], status, moderatedBy: req.nursingUser.id, moderatedAt: new Date().toISOString() };
+    state.auditEvents.unshift(auditEvent(req, 'moderate', 'nursing_course_review', req.params.reviewId));
+    return state.courseReviews[index];
+  });
+  return res.json({ success: true, review });
+}));
+
+router.post('/assistant/ask', requireNursingSession, validateBodyObject, asyncHandler(async (req, res) => {
+  const state = await readState(tenantKeyForUser(req.nursingUser));
+  return res.json({ success: true, response: answerNursingQuestion(state, req.nursingUser, req.body) });
+}));
+
 router.get('/:resource', requireNursingSession, asyncHandler(async (req, res) => {
   const resource = String(req.params.resource || '');
   const key = resourceMap[resource];
@@ -1138,9 +1374,44 @@ router.get('/:resource', requireNursingSession, asyncHandler(async (req, res) =>
   }
   const state = await readState(tenantKeyForUser(req.nursingUser));
   const rawData = key === 'institution' ? state.institution : state[key];
-  const data = visibleResourceData(resource, rawData, req.nursingUser);
+  let data = visibleResourceData(resource, rawData, req.nursingUser);
+  if (Array.isArray(data) && req.nursingUser.role === NURSING_ROLES.STUDENT) {
+    if (resource === 'courses') data = data.filter((item) => ['active', 'published'].includes(item.status));
+    if (resource === 'sections') data = data.filter((item) => item.status !== 'draft' && hasCourseAccess(state, req.nursingUser, item.courseId));
+    if (resource === 'lessons') data = data.filter((item) => !['draft', 'unpublished'].includes(item.status || item.materialStatus) && hasCourseAccess(state, req.nursingUser, item.courseId));
+    if (resource === 'assignments' || resource === 'discussions') data = data.filter((item) => hasCourseAccess(state, req.nursingUser, item.courseId));
+  }
   const responseKey = resource.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
   return res.json({ success: true, [responseKey]: data });
+}));
+
+router.post('/storage/upload-intents', requireNursingSession, validateBodyObject, asyncHandler(async (req, res) => {
+  const kind = String(req.body.objectKind || '');
+  const studentKinds = new Set(['assignment', 'clinical_evidence']);
+  const staffKinds = new Set(['course_media', 'lesson_pdf', 'assignment', 'clinical_evidence']);
+  const allowed = req.nursingUser.role === NURSING_ROLES.STUDENT ? studentKinds : staffKinds;
+  if (!allowed.has(kind)) return res.status(403).json({ success: false, error: 'This account cannot upload that type of object' });
+  return res.status(201).json({ success: true, ...(await createUploadIntent(req.nursingUser, req.body)) });
+}));
+
+router.post('/storage/:objectId/complete', requireNursingSession, asyncHandler(async (req, res) => {
+  if (!UUID_PATTERN.test(req.params.objectId)) return res.status(400).json({ success: false, error: 'A valid object ID is required' });
+  return res.json({ success: true, object: await completeUpload(req.nursingUser, req.params.objectId) });
+}));
+
+router.get('/storage/:objectId/download', requireNursingSession, asyncHandler(async (req, res) => {
+  if (!UUID_PATTERN.test(req.params.objectId)) return res.status(400).json({ success: false, error: 'A valid object ID is required' });
+  return res.json({ success: true, ...(await authorizeStoredObject(req.nursingUser, req.params.objectId)) });
+}));
+
+router.post('/institution-billing/initialize', requireNursingSession, requirePermission('managePayments'), validateBodyObject, asyncHandler(async (req, res) => {
+  const input = {
+    ...req.body,
+    billingKey: validatedText(req.body.billingKey, 'Billing key', 160, { required: true }),
+    billingEmail: validatedText(req.body.billingEmail || req.nursingUser.email, 'Billing email', 254, { required: true }),
+  };
+  if (!EMAIL_PATTERN.test(input.billingEmail)) return res.status(422).json({ success: false, error: 'A valid billing email is required' });
+  return res.status(201).json({ success: true, ...(await initializeInstitutionBilling(req.nursingUser, input)) });
 }));
 
 router.post('/cohorts', requireNursingSession, requirePermission('manageInstitution'), validateBodyObject, asyncHandler(async (req, res) => {
@@ -1171,6 +1442,10 @@ router.post('/courses', requireNursingSession, requirePermission('manageCourses'
     title: title.slice(0, 255),
     code: String(req.body.code || 'NUR-DRAFT').slice(0, 60),
     description: String(req.body.description || '').slice(0, 4000),
+    category: String(req.body.category || 'Core Nursing').slice(0, 120),
+    level: String(req.body.level || 'Foundational').slice(0, 80),
+    syllabus: String(req.body.syllabus || '').slice(0, 20000),
+    learningObjectives: Array.isArray(req.body.learningObjectives) ? req.body.learningObjectives.map((item) => String(item).slice(0, 500)).slice(0, 30) : [],
     status: req.body.status === 'published' ? 'published' : 'draft',
     modules: Array.isArray(req.body.modules) ? req.body.modules : [],
     createdAt: new Date().toISOString(),
@@ -1182,6 +1457,9 @@ router.post('/courses', requireNursingSession, requirePermission('manageCourses'
 router.post('/courses/:courseId/sections', requireNursingSession, requirePermission('manageLessons'), validateBodyObject, asyncHandler(async (req, res) => {
   const title = String(req.body.title || '').trim();
   if (!title) return res.status(400).json({ success: false, error: 'Section title is required' });
+  const state = await readState(tenantKeyForUser(req.nursingUser));
+  const course = (state.courses || []).find((item) => item.id === req.params.courseId);
+  if (!mayManageCourse(course, req.nursingUser)) return res.status(course ? 403 : 404).json({ success: false, error: course ? 'Course management access denied' : 'Course was not found' });
   const section = { id: `section-${crypto.randomUUID()}`, courseId: req.params.courseId, title: title.slice(0, 255), sequence: Number(req.body.sequence || 1), status: req.body.status || 'published', createdBy: req.nursingUser.id, createdAt: new Date().toISOString() };
   return res.status(201).json({ success: true, section: await appendEntity(req, 'courseSections', section, 'create', 'nursing_course_section') });
 }));
@@ -1189,15 +1467,24 @@ router.post('/courses/:courseId/sections', requireNursingSession, requirePermiss
 router.post('/courses/:courseId/lessons', requireNursingSession, requirePermission('manageLessons'), validateBodyObject, asyncHandler(async (req, res) => {
   const title = String(req.body.title || '').trim();
   if (!title) return res.status(400).json({ success: false, error: 'Lesson title is required' });
+  const state = await readState(tenantKeyForUser(req.nursingUser));
+  const course = (state.courses || []).find((item) => item.id === req.params.courseId);
+  if (!mayManageCourse(course, req.nursingUser)) return res.status(course ? 403 : 404).json({ success: false, error: course ? 'Course management access denied' : 'Course was not found' });
   const lesson = {
     id: `lesson-${crypto.randomUUID()}`,
     courseId: req.params.courseId,
     sectionId: req.body.sectionId || null,
     title: title.slice(0, 255),
-    contentType: req.body.contentType || 'text',
+    contentType: ['video', 'audio', 'text', 'pdf', 'reading', 'slides', 'case_note'].includes(req.body.contentType) ? req.body.contentType : 'text',
     contentBody: String(req.body.contentBody || '').slice(0, 30000),
     videoUrl: req.body.videoUrl || null,
+    audioUrl: req.body.audioUrl || null,
     resourceUrl: req.body.resourceUrl || null,
+    storageObjectId: req.body.storageObjectId || null,
+    transcript: String(req.body.transcript || '').slice(0, 50000),
+    captionsUrl: req.body.captionsUrl || null,
+    captionsText: String(req.body.captionsText || '').slice(0, 50000),
+    objectives: Array.isArray(req.body.objectives) ? req.body.objectives.map((item) => String(item).slice(0, 500)).slice(0, 20) : [],
     estimatedMinutes: Math.max(1, Number(req.body.estimatedMinutes || 15)),
     status: req.body.status || 'draft',
     createdBy: req.nursingUser.id,
@@ -1207,21 +1494,38 @@ router.post('/courses/:courseId/lessons', requireNursingSession, requirePermissi
 }));
 
 router.post('/lessons/:lessonId/progress', requireNursingSession, requirePermission('completeLesson'), validateBodyObject, asyncHandler(async (req, res) => {
-  const progress = {
-    id: `progress-${crypto.randomUUID()}`,
-    studentId: req.nursingUser.id,
-    lessonId: req.params.lessonId,
-    courseId: req.body.courseId || null,
-    status: req.body.status || 'completed',
-    progressPercent: Math.min(100, Math.max(0, Number(req.body.progressPercent || 100))),
-    completedAt: new Date().toISOString(),
-  };
-  return res.status(201).json({ success: true, progress: await appendEntity(req, 'lessonProgress', progress, 'complete', 'nursing_lesson') });
+  const progress = await mutateState(tenantKeyForUser(req.nursingUser), (state) => {
+    const lesson = (state.lessons || []).find((item) => item.id === req.params.lessonId);
+    if (!lesson) throw requestError('Lesson was not found', 'LESSON_NOT_FOUND', 404);
+    const enrolled = (state.courseEnrollments || []).some((item) => item.studentId === req.nursingUser.id && item.courseId === lesson.courseId);
+    if (!enrolled) throw requestError('Lesson access requires an active course enrollment', 'LESSON_ACCESS_DENIED', 403);
+    const index = state.lessonProgress.findIndex((item) => item.studentId === req.nursingUser.id && item.lessonId === lesson.id);
+    const progressPercent = Math.min(100, Math.max(0, Number(req.body.progressPercent ?? 100)));
+    const next = {
+      id: index >= 0 ? state.lessonProgress[index].id : `progress-${crypto.randomUUID()}`,
+      studentId: req.nursingUser.id,
+      lessonId: lesson.id,
+      courseId: lesson.courseId,
+      status: progressPercent >= 100 ? 'completed' : 'in_progress',
+      progressPercent,
+      resumeSeconds: Math.max(0, Math.floor(Number(req.body.resumeSeconds || 0))),
+      lastAccessedAt: new Date().toISOString(),
+      completedAt: progressPercent >= 100 ? new Date().toISOString() : null,
+    };
+    if (index >= 0) state.lessonProgress[index] = next;
+    else state.lessonProgress.unshift(next);
+    state.auditEvents.unshift(auditEvent(req, progressPercent >= 100 ? 'complete' : 'resume', 'nursing_lesson', lesson.id));
+    return next;
+  });
+  return res.status(201).json({ success: true, progress });
 }));
 
 router.post('/assignments', requireNursingSession, requirePermission('manageAssignments'), validateBodyObject, asyncHandler(async (req, res) => {
   const title = String(req.body.title || '').trim();
   if (!title || !req.body.courseId) return res.status(400).json({ success: false, error: 'Assignment title and course are required' });
+  const state = await readState(tenantKeyForUser(req.nursingUser));
+  const course = (state.courses || []).find((item) => item.id === req.body.courseId);
+  if (!mayManageCourse(course, req.nursingUser)) return res.status(course ? 403 : 404).json({ success: false, error: course ? 'Course management access denied' : 'Course was not found' });
   const assignment = { id: `assignment-${crypto.randomUUID()}`, courseId: req.body.courseId, title: title.slice(0, 255), instructions: String(req.body.instructions || '').slice(0, 10000), dueDate: req.body.dueDate || null, maxScore: Math.max(1, Number(req.body.maxScore || 100)), rubric: Array.isArray(req.body.rubric) ? req.body.rubric : [], status: req.body.status || 'published', createdBy: req.nursingUser.id, createdAt: new Date().toISOString() };
   return res.status(201).json({ success: true, assignment: await appendEntity(req, 'assignments', assignment, 'create', 'nursing_assignment') });
 }));
@@ -1229,14 +1533,23 @@ router.post('/assignments', requireNursingSession, requirePermission('manageAssi
 router.post('/assignments/:assignmentId/submissions', requireNursingSession, requirePermission('submitAssignment'), validateBodyObject, asyncHandler(async (req, res) => {
   const submissionText = String(req.body.submissionText || '').trim();
   if (!submissionText) return res.status(400).json({ success: false, error: 'Submission text is required' });
-  const submission = { id: `submission-${crypto.randomUUID()}`, assignmentId: req.params.assignmentId, studentId: req.nursingUser.id, courseId: req.body.courseId || null, submissionText: submissionText.slice(0, 30000), attachmentUrl: req.body.attachmentUrl || null, status: 'submitted', submittedAt: new Date().toISOString() };
+  const state = await readState(tenantKeyForUser(req.nursingUser));
+  const assignment = (state.assignments || []).find((item) => item.id === req.params.assignmentId && item.status !== 'draft');
+  if (!assignment) return res.status(404).json({ success: false, error: 'Assignment was not found' });
+  if (!hasCourseAccess(state, req.nursingUser, assignment.courseId)) return res.status(403).json({ success: false, error: 'Assignment access denied' });
+  const submission = { id: `submission-${crypto.randomUUID()}`, assignmentId: assignment.id, studentId: req.nursingUser.id, courseId: assignment.courseId, submissionText: submissionText.slice(0, 30000), attachmentUrl: req.body.attachmentUrl || null, status: 'submitted', submittedAt: new Date().toISOString() };
   return res.status(201).json({ success: true, submission: await appendEntity(req, 'assignmentSubmissions', submission, 'submit', 'nursing_assignment') });
 }));
 
 router.patch('/submissions/:submissionId/grade', requireNursingSession, requirePermission('gradeAssignments'), validateBodyObject, asyncHandler(async (req, res) => {
   const score = Number(req.body.score);
   if (!Number.isFinite(score) || score < 0) return res.status(400).json({ success: false, error: 'A valid non-negative score is required' });
-  const grade = { id: `grade-${crypto.randomUUID()}`, submissionId: req.params.submissionId, gradeType: 'assignment', score, maxScore: Math.max(1, Number(req.body.maxScore || 100)), comments: String(req.body.comments || '').slice(0, 4000), status: 'graded', gradedBy: req.nursingUser.id, gradedAt: new Date().toISOString() };
+  const state = await readState(tenantKeyForUser(req.nursingUser));
+  const submission = (state.assignmentSubmissions || []).find((item) => item.id === req.params.submissionId);
+  const course = submission ? (state.courses || []).find((item) => item.id === submission.courseId) : null;
+  if (!submission || !course) return res.status(404).json({ success: false, error: 'Submission was not found' });
+  if (!mayManageCourse(course, req.nursingUser)) return res.status(403).json({ success: false, error: 'Grading access denied' });
+  const grade = { id: `grade-${crypto.randomUUID()}`, submissionId: submission.id, studentId: submission.studentId, courseId: submission.courseId, gradeType: 'assignment', score, maxScore: Math.max(1, Number(req.body.maxScore || 100)), comments: String(req.body.comments || '').slice(0, 4000), status: 'graded', gradedBy: req.nursingUser.id, gradedAt: new Date().toISOString() };
   return res.json({ success: true, grade: await appendEntity(req, 'grades', grade, 'grade', 'nursing_assignment_submission') });
 }));
 
@@ -1244,6 +1557,8 @@ router.post('/discussions', requireNursingSession, validateBodyObject, asyncHand
   const title = String(req.body.title || '').trim();
   const body = String(req.body.body || '').trim();
   if (!title || !body || !req.body.courseId) return res.status(400).json({ success: false, error: 'Discussion title, body, and course are required' });
+  const state = await readState(tenantKeyForUser(req.nursingUser));
+  if (!hasCourseAccess(state, req.nursingUser, req.body.courseId)) return res.status(403).json({ success: false, error: 'Course discussion access denied' });
   const discussion = { id: `discussion-${crypto.randomUUID()}`, courseId: req.body.courseId, authorId: req.nursingUser.id, title: title.slice(0, 255), body: body.slice(0, 10000), status: 'open', createdAt: new Date().toISOString() };
   return res.status(201).json({ success: true, discussion: await appendEntity(req, 'courseDiscussions', discussion, 'create', 'nursing_course_discussion') });
 }));
@@ -1251,6 +1566,10 @@ router.post('/discussions', requireNursingSession, validateBodyObject, asyncHand
 router.post('/discussions/:discussionId/replies', requireNursingSession, validateBodyObject, asyncHandler(async (req, res) => {
   const body = String(req.body.body || '').trim();
   if (!body) return res.status(400).json({ success: false, error: 'Reply body is required' });
+  const state = await readState(tenantKeyForUser(req.nursingUser));
+  const discussion = (state.courseDiscussions || []).find((item) => item.id === req.params.discussionId && item.status === 'open');
+  if (!discussion) return res.status(404).json({ success: false, error: 'Discussion was not found' });
+  if (!hasCourseAccess(state, req.nursingUser, discussion.courseId)) return res.status(403).json({ success: false, error: 'Course discussion access denied' });
   const reply = { id: `discussion-reply-${crypto.randomUUID()}`, discussionId: req.params.discussionId, authorId: req.nursingUser.id, body: body.slice(0, 10000), status: 'published', createdAt: new Date().toISOString() };
   return res.status(201).json({ success: true, reply: await appendEntity(req, 'courseDiscussionReplies', reply, 'create', 'nursing_course_discussion_reply') });
 }));
@@ -1294,6 +1613,7 @@ router.post('/quizzes/:quizId/attempts', requireNursingSession, requirePermissio
   const state = await readState(tenantKeyForUser(req.nursingUser));
   const quiz = state.quizzes.find((item) => item.id === req.params.quizId);
   if (!quiz) return res.status(404).json({ success: false, error: 'Quiz not found' });
+  if (!hasCourseAccess(state, req.nursingUser, quiz.courseId)) return res.status(403).json({ success: false, error: 'Quiz access denied' });
   const answers = Array.isArray(req.body.answers) ? req.body.answers : Object.values(req.body.answers || {});
   const correct = quiz.questions.filter((question, index) => Number(answers[index]) === Number(question.correctIndex)).length;
   const score = quiz.questions.length ? Math.round((correct / quiz.questions.length) * 100) : 0;
@@ -1325,7 +1645,12 @@ router.post('/logbook', requireNursingSession, requirePermission('submitLogbook'
   const reflection = String(req.body.reflection || '').trim();
   const hoursCompleted = Number(req.body.hoursCompleted || 0);
   if (!reflection || hoursCompleted <= 0 || hoursCompleted > 24) return res.status(400).json({ success: false, error: 'A reflection and valid clinical hours are required' });
-  const entry = { id: `logbook-${crypto.randomUUID()}`, studentId: req.nursingUser.id, institutionId: req.nursingUser.institutionId, departmentId: req.nursingUser.departmentId, supervisorId: req.body.supervisorId || null, clinicalSite: String(req.body.clinicalSite || 'Clinical placement site').slice(0, 255), wardUnit: String(req.body.wardUnit || 'General ward').slice(0, 160), date: req.body.date || new Date().toISOString().slice(0, 10), hoursCompleted, encounterCategory: String(req.body.encounterCategory || 'General nursing').slice(0, 160), skillsPerformed: Array.isArray(req.body.skillsPerformed) ? req.body.skillsPerformed.slice(0, 30) : [], reflection: reflection.slice(0, 10000), status: 'pending', supervisorComments: '', submittedAt: new Date().toISOString() };
+  const state = await readState(tenantKeyForUser(req.nursingUser));
+  const supervisorId = req.body.supervisorId || null;
+  if (supervisorId && !(state.users || []).some((item) => item.id === supervisorId && item.role === NURSING_ROLES.SUPERVISOR && item.status === 'active')) {
+    return res.status(422).json({ success: false, error: 'Select an active supervisor in this institution' });
+  }
+  const entry = { id: `logbook-${crypto.randomUUID()}`, studentId: req.nursingUser.id, institutionId: req.nursingUser.institutionId, departmentId: req.nursingUser.departmentId, supervisorId, clinicalSite: String(req.body.clinicalSite || 'Clinical placement site').slice(0, 255), wardUnit: String(req.body.wardUnit || 'General ward').slice(0, 160), date: req.body.date || new Date().toISOString().slice(0, 10), hoursCompleted, encounterCategory: String(req.body.encounterCategory || 'General nursing').slice(0, 160), skillsPerformed: Array.isArray(req.body.skillsPerformed) ? req.body.skillsPerformed.slice(0, 30) : [], reflection: reflection.slice(0, 10000), status: 'pending', supervisorComments: '', submittedAt: new Date().toISOString() };
   return res.status(201).json({ success: true, entry: await appendEntity(req, 'logbookEntries', entry, 'submit', 'nursing_logbook_entry') });
 }));
 
@@ -1336,6 +1661,11 @@ router.patch('/logbook/:entryId/review', requireNursingSession, requirePermissio
     if (index < 0) {
       const error = new Error('Logbook entry not found');
       error.statusCode = 404;
+      throw error;
+    }
+    if (req.nursingUser.role === NURSING_ROLES.SUPERVISOR && state.logbookEntries[index].supervisorId && state.logbookEntries[index].supervisorId !== req.nursingUser.id) {
+      const error = new Error('This logbook entry is assigned to another supervisor');
+      error.statusCode = 403;
       throw error;
     }
     const entry = { ...state.logbookEntries[index], status, supervisorId: req.nursingUser.id, supervisorComments: String(req.body.comments || '').slice(0, 4000), reviewedAt: new Date().toISOString() };
@@ -1374,12 +1704,48 @@ router.patch('/payments/:paymentId/verify', requireNursingSession, requirePermis
 
 router.post('/certificates', requireNursingSession, requirePermission('issueCertificates'), validateBodyObject, asyncHandler(async (req, res) => {
   if (!req.body.studentId) return res.status(400).json({ success: false, error: 'Student is required' });
-  const certificate = { id: `certificate-${crypto.randomUUID()}`, studentId: req.body.studentId, certificateType: req.body.certificateType || 'Certificate of Participation', programName: String(req.body.programName || 'DoctaRx Nursing Education & Clinical Training Platform').slice(0, 255), institutionId: req.nursingUser.institutionId, status: 'issued', verificationCode: `DRX-NUR-${crypto.randomInt(100000, 999999)}`, issueDate: new Date().toISOString().slice(0, 10), issuedBy: req.nursingUser.id };
-  return res.status(201).json({ success: true, certificate: await appendEntity(req, 'certificates', certificate, 'issue', 'nursing_certificate') });
+  const state = await readState(tenantKeyForUser(req.nursingUser));
+  const student = (state.users || []).find((item) => item.id === req.body.studentId && item.role === NURSING_ROLES.STUDENT);
+  if (!student) return res.status(404).json({ success: false, error: 'Student was not found in this institution' });
+  const certificate = {
+    id: `certificate-${crypto.randomUUID()}`,
+    studentId: student.id,
+    courseId: req.body.courseId || null,
+    certificateType: String(req.body.certificateType || 'Certificate of Participation').slice(0, 160),
+    programName: String(req.body.programName || 'DoctaRx Nursing Education & Clinical Training Platform').slice(0, 255),
+    institutionId: req.nursingUser.institutionId,
+    institutionName: state.institution?.name || 'Authorized nursing institution',
+    status: 'issued',
+    issueDate: new Date().toISOString().slice(0, 10),
+    issuedBy: req.nursingUser.id,
+  };
+  let verifiable = null;
+  if (pool) {
+    const issued = await issueCertificatePdf(req.nursingUser, certificate, student);
+    verifiable = issued.certificate;
+    certificate.verificationCode = verifiable.verification_code;
+    certificate.pdfSha256 = verifiable.pdf_sha256;
+  } else {
+    certificate.verificationCode = `DRX-NUR-${crypto.randomInt(100000, 999999)}`;
+  }
+  const saved = await appendEntity(req, 'certificates', certificate, 'issue', 'nursing_certificate');
+  return res.status(201).json({ success: true, certificate: saved, verifiable: verifiable ? { verificationCode: verifiable.verification_code, claimsSha256: verifiable.claims_sha256, pdfSha256: verifiable.pdf_sha256 } : null });
+}));
+
+router.post('/certificates/:code/revoke', requireNursingSession, requirePermission('issueCertificates'), validateBodyObject, asyncHandler(async (req, res) => {
+  const code = String(req.params.code || '').toUpperCase();
+  if (!VERIFICATION_CODE_PATTERN.test(code)) return res.status(400).json({ success: false, error: 'A valid certificate verification code is required' });
+  const result = await revokeCertificate(req.nursingUser, code, req.body.reason);
+  await mutateState(tenantKeyForUser(req.nursingUser), (state) => {
+    const index = (state.certificates || []).findIndex((item) => item.verificationCode === code);
+    if (index >= 0) state.certificates[index] = { ...state.certificates[index], status: 'revoked', revokedAt: new Date().toISOString(), revocationReason: String(req.body.reason).slice(0, 1000) };
+    state.auditEvents.unshift(auditEvent(req, 'revoke', 'nursing_certificate', code));
+  });
+  return res.json({ success: true, ...result });
 }));
 
 router.use((error, _req, res, _next) => {
-  if (process.env.NODE_ENV !== 'test') console.error('Nursing API error:', error.message);
+  void reportOperationalAlert(error, { method: _req.method, path: _req.path, userId: _req.nursingUser?.id || null });
   if (error.retryAfterSeconds) res.set('Retry-After', String(error.retryAfterSeconds));
   return res.status(error.statusCode || 500).json({
     success: false,
