@@ -67,7 +67,7 @@ for (const role of roles) {
       const title = `Fictional browser course ${testInfo.project.name}`;
       await page.getByPlaceholder('Course title').fill(title);
       await page.getByRole('button', { name: 'Create Course' }).click();
-      await expect(page.getByText(title, { exact: true })).toBeVisible();
+      await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible();
       const refreshed = await page.evaluate(async () => (await fetch('/api/nursing/bootstrap')).json());
       expect(refreshed.state.courses.some((course) => course.title === title)).toBe(true);
     }

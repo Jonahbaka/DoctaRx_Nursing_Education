@@ -1244,26 +1244,6 @@ function StudentProfileSection({ seed, role, session }) {
         ) : null}
       />
       <ActionError message={actionError} />
-      <Card className="mb-5 rounded-lg border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-        <CardHeader>
-          <CardTitle className="text-xl tracking-normal">Course catalogue</CardTitle>
-          <CardDescription>Search by course name, code, outcome, level, or category.</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-[1fr_260px_auto]">
-          <div>
-            <Label htmlFor="course-catalogue-search">Search courses</Label>
-            <Input id="course-catalogue-search" type="search" className="mt-1" value={catalogueQuery} onChange={(event) => setCatalogueQuery(event.target.value)} placeholder="Try telehealth, informatics, or documentation" />
-          </div>
-          <div>
-            <Label htmlFor="course-category-filter">Category</Label>
-            <select id="course-category-filter" className="mt-1 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-950" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
-              <option value="">All categories</option>
-              {categories.map((category) => <option key={category} value={category}>{category}</option>)}
-            </select>
-          </div>
-          <Button type="button" variant="outline" className="self-end" onClick={() => { setCatalogueQuery(''); setCategoryFilter(''); }}>Clear filters</Button>
-        </CardContent>
-      </Card>
       <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
         <div className="grid gap-4">
           <StudentProfileHeader
@@ -1692,6 +1672,26 @@ function CoursesSection({ seed, role, session }) {
         title="Courses, Lessons, and Progress"
       />
       <ActionError message={actionError} />
+      <Card className="mb-5 rounded-lg border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+        <CardHeader>
+          <CardTitle className="text-xl tracking-normal">Course catalogue</CardTitle>
+          <CardDescription>Search by course name, code, outcome, level, or category.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 sm:grid-cols-[1fr_260px_auto]">
+          <div>
+            <Label htmlFor="course-catalogue-search">Search courses</Label>
+            <Input id="course-catalogue-search" type="search" className="mt-1" value={catalogueQuery} onChange={(event) => setCatalogueQuery(event.target.value)} placeholder="Try telehealth, informatics, or documentation" />
+          </div>
+          <div>
+            <Label htmlFor="course-category-filter">Category</Label>
+            <select id="course-category-filter" className="mt-1 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-950" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
+              <option value="">All categories</option>
+              {categories.map((category) => <option key={category} value={category}>{category}</option>)}
+            </select>
+          </div>
+          <Button type="button" variant="outline" className="self-end" onClick={() => { setCatalogueQuery(''); setCategoryFilter(''); }}>Clear filters</Button>
+        </CardContent>
+      </Card>
       {canManage ? (
         <div className="mb-5">
           <CourseBuilder
