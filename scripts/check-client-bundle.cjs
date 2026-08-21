@@ -3,7 +3,7 @@ const path = require('node:path');
 
 const root = path.join(process.cwd(), '.next', 'static', 'chunks');
 const forbidden = [
-  'DemoPass!2026',
+  'Demo12345678!',
   'NURSING_TEST_ACCOUNT_PASSWORD',
   'NURSING_SESSION_SECRET',
   'local-only-nursing-session-secret-change-before-production',

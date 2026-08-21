@@ -24,7 +24,7 @@ const { resetForTests } = require('../server/services/nursingPlatformStore');
 const { getNursingSeedData, NURSING_ROLES } = require('../lib/nursingEducationData');
 
 const SET_ID = '11111111-1111-4111-8111-111111111111';
-const PASSWORD = process.env.NURSING_TEST_ACCOUNT_PASSWORD || 'DemoPass!2026';
+const PASSWORD = process.env.NURSING_TEST_ACCOUNT_PASSWORD || 'Demo12345678!';
 const FIXTURE_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <document xmlns="urn:hl7-org:v3">
   <id root="22222222-2222-4222-8222-222222222222"/>

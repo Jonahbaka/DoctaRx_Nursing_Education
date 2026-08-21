@@ -3,14 +3,14 @@
 const { test, expect } = require('@playwright/test');
 const AxeBuilder = require('@axe-core/playwright').default;
 
-const password = process.env.NURSING_TEST_ACCOUNT_PASSWORD || 'DatabaseProof!2026';
+const password = process.env.NURSING_TEST_ACCOUNT_PASSWORD || 'Demo12345678!';
 const roles = [
-  { label: 'Student Nurse', email: 'nursing.student.preview@uniabuja.edu.ng', route: '/ng/nursing/student', tab: 'LMS' },
-  { label: 'Lecturer', email: 'ifeoma.lecturer@uniabuja.demo', route: '/ng/nursing/lecturer', tab: 'LMS' },
-  { label: 'HOD / Department Admin', email: 'hod.nursing@uniabuja.demo', route: '/ng/nursing/hod', tab: 'Reports' },
-  { label: 'Clinical Coordinator', email: 'clinical.coordinator@uniabuja.demo', route: '/ng/nursing/coordinator', tab: 'Logbook' },
-  { label: 'Clinical Supervisor / Preceptor', email: 'preceptor.one@uniabuja.demo', route: '/ng/nursing/supervisor', tab: 'Logbook' },
-  { label: 'Institution Admin', email: 'nursing.admin@uniabuja.demo', route: '/ng/nursing/admin', tab: 'Institution' },
+  { label: 'Student Nurse', email: 'student@demo.doctarx.com', route: '/ng/nursing/student', tab: 'LMS' },
+  { label: 'Lecturer', email: 'teacher@demo.doctarx.com', route: '/ng/nursing/lecturer', tab: 'LMS' },
+  { label: 'HOD / Department Admin', email: 'hod@demo.doctarx.com', route: '/ng/nursing/hod', tab: 'Reports' },
+  { label: 'Clinical Coordinator', email: 'coordinator@demo.doctarx.com', route: '/ng/nursing/coordinator', tab: 'Logbook' },
+  { label: 'Clinical Supervisor / Preceptor', email: 'supervisor@demo.doctarx.com', route: '/ng/nursing/supervisor', tab: 'Logbook' },
+  { label: 'Institution Admin', email: 'school@demo.doctarx.com', route: '/ng/nursing/admin', tab: 'Institution' },
 ];
 
 async function openNavigationIfNeeded(page) {

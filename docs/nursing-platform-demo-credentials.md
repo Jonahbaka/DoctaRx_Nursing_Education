@@ -2,21 +2,27 @@
 
 These accounts contain fictional training data and are provided only for local or controlled acceptance testing. Outside production, they are available through the server-side QA authenticator. In production they exist only when an operator intentionally runs `npm run seed`.
 
-Shared local QA password:
+Shared developer-demo password:
 
 ```text
-DemoPass!2026
+Demo12345678!
 ```
 
 | Role | Email | Route |
 | --- | --- | --- |
-| Student Nurse | nursing.student.preview@uniabuja.edu.ng | `/ng/nursing/student` |
-| Lecturer | ifeoma.lecturer@uniabuja.demo | `/ng/nursing/lecturer` |
-| HOD / Department Admin | hod.nursing@uniabuja.demo | `/ng/nursing/hod` |
-| Clinical Coordinator | clinical.coordinator@uniabuja.demo | `/ng/nursing/coordinator` |
-| Clinical Supervisor / Preceptor | preceptor.one@uniabuja.demo | `/ng/nursing/supervisor` |
-| Institution Admin | nursing.admin@uniabuja.demo | `/ng/nursing/admin` |
-| Super Admin | nursing.superadmin@doctarx.demo | `/ng/nursing/admin` |
-| Support Admin | nursing.support@doctarx.demo | `/ng/nursing/admin` |
+| Student Nurse | student@demo.doctarx.com | `/ng/nursing/student` |
+| Lecturer | teacher@demo.doctarx.com | `/ng/nursing/lecturer` |
+| HOD / Department Admin | hod@demo.doctarx.com | `/ng/nursing/hod` |
+| Clinical Coordinator | coordinator@demo.doctarx.com | `/ng/nursing/coordinator` |
+| Clinical Supervisor / Preceptor | supervisor@demo.doctarx.com | `/ng/nursing/supervisor` |
+| Institution Admin | school@demo.doctarx.com | `/ng/nursing/admin` |
+| Super Admin | admin@demo.doctarx.com | `/ng/nursing/admin` |
+| Support Admin | support@demo.doctarx.com | `/ng/nursing/admin` |
 
-Before seeding any shared environment, set `NURSING_TEST_ACCOUNT_PASSWORD` to a unique temporary value. Disable or remove QA accounts before admitting real users. The bundle verification script ensures the local password is not shipped in browser JavaScript.
+Additional seeded identities use the same password:
+
+- Second lecturer: `teacher2@demo.doctarx.com`
+- Second supervisor: `supervisor2@demo.doctarx.com`
+- Additional students: `student02@demo.doctarx.com` through `student20@demo.doctarx.com`
+
+These accounts are fictional and developer-only. They are available online only when the operator explicitly enables the controlled demo seed. Disable or remove them before admitting real institutional data. The bundle verification script ensures the password is not shipped in browser JavaScript.

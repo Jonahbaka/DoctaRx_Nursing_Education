@@ -22,7 +22,7 @@ const {
   verifyCertificate,
 } = require('../server/services/productionIntegrations');
 
-const PASSWORD = process.env.NURSING_TEST_ACCOUNT_PASSWORD || 'DatabaseProof!2026';
+const PASSWORD = process.env.NURSING_TEST_ACCOUNT_PASSWORD || 'Demo12345678!';
 const DEFAULT_TENANT = 'inst-uniabuja';
 const BETA_TENANT = 'inst-fictional-beta';
 
@@ -83,7 +83,7 @@ test('PostgreSQL production workflow proves migration, isolation, concurrency, r
   ]);
 
   const app = createApiApp();
-  const alphaUser = await signIn(app, 'nursing.student.preview@uniabuja.edu.ng');
+  const alphaUser = await signIn(app, 'student@demo.doctarx.com');
   assert.equal(alphaUser.user.id, 'user-student-01');
   const alphaBootstrap = await alphaUser.agent.get('/api/nursing/bootstrap');
   assert.equal(alphaBootstrap.status, 200, alphaBootstrap.text);

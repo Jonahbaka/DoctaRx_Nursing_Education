@@ -9,7 +9,7 @@ const { resetForTests } = require('../server/services/nursingPlatformStore');
 const { canonicalJson, liveKitToken, renderCertificatePdf } = require('../server/services/productionIntegrations');
 const { getNursingSeedData } = require('../lib/nursingEducationData');
 
-const PASSWORD = process.env.NURSING_TEST_ACCOUNT_PASSWORD || 'DemoPass!2026';
+const PASSWORD = process.env.NURSING_TEST_ACCOUNT_PASSWORD || 'Demo12345678!';
 let app;
 
 beforeEach(() => {
@@ -44,7 +44,7 @@ test('grounded assistant cites authorized lessons and rejects answer extraction 
 });
 
 test('catalogue filters and learner notes, bookmarks, resume, reviews, and assistant persist through APIs', async () => {
-  const student = await signIn('nursing.student.preview@uniabuja.edu.ng');
+  const student = await signIn('student@demo.doctarx.com');
   const catalogue = await student.agent.get('/api/nursing/catalogue?q=telehealth');
   assert.equal(catalogue.status, 200, catalogue.text);
   assert.ok(catalogue.body.courses.length > 0);
@@ -79,8 +79,8 @@ test('catalogue filters and learner notes, bookmarks, resume, reviews, and assis
 });
 
 test('learner controls enforce enrollment and assistant course scope', async () => {
-  const student = await signIn('nursing.student.preview@uniabuja.edu.ng');
-  const lecturer = await signIn('ifeoma.lecturer@uniabuja.demo');
+  const student = await signIn('student@demo.doctarx.com');
+  const lecturer = await signIn('teacher@demo.doctarx.com');
   const created = await lecturer.agent.post('/api/nursing/courses').send({ title: 'Unassigned private draft', status: 'draft' });
   assert.equal(created.status, 201, created.text);
   const lesson = await lecturer.agent.post(`/api/nursing/courses/${created.body.course.id}/lessons`).send({ title: 'Private draft lesson', contentBody: 'Not assigned to the student.' });
