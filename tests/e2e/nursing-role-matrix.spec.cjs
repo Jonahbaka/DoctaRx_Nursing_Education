@@ -53,7 +53,11 @@ for (const role of roles) {
       await expect(page.getByText('Foundations of Telehealth Nursing', { exact: true }).first()).toBeVisible();
       await page.getByLabel('Private lesson notes').fill(`Fictional browser note ${testInfo.project.name}`);
       await page.getByLabel('Resume position (seconds)').fill('77');
-      await page.getByRole('button', { name: 'Bookmark', exact: true }).click();
+      const bookmark = page.getByRole('button', { name: /^Bookmark(?:ed)?$/ });
+      if ((await bookmark.textContent()).trim() === 'Bookmark') {
+        await bookmark.click();
+        await expect(page.getByRole('button', { name: 'Bookmarked', exact: true })).toBeVisible();
+      }
       await page.getByRole('button', { name: 'Save notes' }).click();
       await expect(page.getByRole('status').filter({ hasText: 'saved' })).toBeVisible();
       await page.getByLabel('Ask about this course').fill('How should privacy and consent work in remote care?');

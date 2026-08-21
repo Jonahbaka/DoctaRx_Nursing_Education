@@ -89,11 +89,11 @@ export default function LessonPlayer({ course, lessons, completedLessonIds, canC
                   <Label htmlFor="resume-position" className="text-white">Resume position (seconds)</Label>
                   <Input id="resume-position" type="number" min="0" value={resumeSeconds} onChange={(event) => setResumeSeconds(event.target.value)} className="mt-1 border-white/10 bg-slate-950 text-white" />
                 </div>
-                <Button type="button" variant="outline" disabled={saving} onClick={() => saveEngagement({ bookmarked: !currentActivity?.bookmarked })}>
+                <Button type="button" variant="outline" className="text-slate-900 hover:text-slate-950" disabled={saving} onClick={() => saveEngagement({ bookmarked: !currentActivity?.bookmarked })}>
                   {currentActivity?.bookmarked ? <BookmarkCheck className="mr-2 h-4 w-4" /> : <Bookmark className="mr-2 h-4 w-4" />}
                   {currentActivity?.bookmarked ? 'Bookmarked' : 'Bookmark'}
                 </Button>
-                <Button type="button" disabled={saving} onClick={() => saveEngagement()}><Save className="mr-2 h-4 w-4" />{saving ? 'Saving…' : 'Save notes'}</Button>
+                <Button type="button" className="bg-teal-700 text-white hover:bg-teal-800" disabled={saving} onClick={() => saveEngagement()}><Save className="mr-2 h-4 w-4" />{saving ? 'Saving…' : 'Save notes'}</Button>
               </div>
               {saved ? <p role="status" className="text-xs text-teal-200">Lesson notes and resume position saved.</p> : null}
             </div>

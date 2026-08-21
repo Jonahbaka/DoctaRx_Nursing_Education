@@ -1795,7 +1795,7 @@ function CoursesSection({ seed, role, session }) {
             <form className="grid gap-3" onSubmit={askAssistant}>
               <Label htmlFor="nursing-assistant-question">Ask about this course</Label>
               <Textarea id="nursing-assistant-question" rows={3} value={assistantQuestion} onChange={(event) => setAssistantQuestion(event.target.value)} placeholder="How should I structure remote triage documentation?" />
-              <Button type="submit" className="w-fit" disabled={assistantBusy}>{assistantBusy ? 'Checking course material…' : 'Ask assistant'}</Button>
+              <Button type="submit" className="w-fit bg-teal-700 text-white hover:bg-teal-800" disabled={assistantBusy}>{assistantBusy ? 'Checking course material…' : 'Ask assistant'}</Button>
             </form>
             {assistantResponse ? (
               <div role="status" className="mt-4 rounded-lg border border-teal-200 bg-white p-4 text-sm dark:border-teal-900 dark:bg-slate-950">
