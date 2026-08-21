@@ -14,6 +14,7 @@ export default function LessonPlayer({ course, lessons, completedLessonIds, canC
   const [note, setNote] = useState(currentActivity?.note || '');
   const [resumeSeconds, setResumeSeconds] = useState(currentActivity?.resumeSeconds || 0);
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
   const completedCount = lessons.filter((lesson) => completedLessonIds.has(lesson.id)).length;
   const percent = lessons.length ? Math.round((completedCount / lessons.length) * 100) : 0;
 
@@ -28,14 +29,20 @@ export default function LessonPlayer({ course, lessons, completedLessonIds, canC
 
   async function saveEngagement(patch = {}) {
     if (!activeLesson || !onSaveEngagement) return;
-    await onSaveEngagement(activeLesson, {
-      note,
-      resumeSeconds: Number(resumeSeconds) || 0,
-      progressPercent: currentActivity?.progressPercent || 0,
-      bookmarked: currentActivity?.bookmarked || false,
-      ...patch,
-    });
-    setSaved(true);
+    setSaving(true);
+    setSaved(false);
+    try {
+      await onSaveEngagement(activeLesson, {
+        note,
+        resumeSeconds: Number(resumeSeconds) || 0,
+        progressPercent: currentActivity?.progressPercent || 0,
+        bookmarked: currentActivity?.bookmarked || false,
+        ...patch,
+      });
+      setSaved(true);
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -82,11 +89,11 @@ export default function LessonPlayer({ course, lessons, completedLessonIds, canC
                   <Label htmlFor="resume-position" className="text-white">Resume position (seconds)</Label>
                   <Input id="resume-position" type="number" min="0" value={resumeSeconds} onChange={(event) => setResumeSeconds(event.target.value)} className="mt-1 border-white/10 bg-slate-950 text-white" />
                 </div>
-                <Button type="button" variant="outline" onClick={() => saveEngagement({ bookmarked: !currentActivity?.bookmarked })}>
+                <Button type="button" variant="outline" disabled={saving} onClick={() => saveEngagement({ bookmarked: !currentActivity?.bookmarked })}>
                   {currentActivity?.bookmarked ? <BookmarkCheck className="mr-2 h-4 w-4" /> : <Bookmark className="mr-2 h-4 w-4" />}
                   {currentActivity?.bookmarked ? 'Bookmarked' : 'Bookmark'}
                 </Button>
-                <Button type="button" onClick={() => saveEngagement()}><Save className="mr-2 h-4 w-4" />Save notes</Button>
+                <Button type="button" disabled={saving} onClick={() => saveEngagement()}><Save className="mr-2 h-4 w-4" />{saving ? 'Saving…' : 'Save notes'}</Button>
               </div>
               {saved ? <p role="status" className="text-xs text-teal-200">Lesson notes and resume position saved.</p> : null}
             </div>

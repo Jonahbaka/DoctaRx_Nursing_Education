@@ -84,6 +84,11 @@ test('PostgreSQL production workflow proves migration, isolation, concurrency, r
 
   const app = createApiApp();
   const alphaUser = await signIn(app, 'nursing.student.preview@uniabuja.edu.ng');
+  assert.equal(alphaUser.user.id, 'user-student-01');
+  const alphaBootstrap = await alphaUser.agent.get('/api/nursing/bootstrap');
+  assert.equal(alphaBootstrap.status, 200, alphaBootstrap.text);
+  assert.ok(alphaBootstrap.body.state.courseEnrollments.some((item) => item.studentId === alphaUser.user.id));
+  assert.ok(alphaBootstrap.body.state.lessons.some((item) => item.courseId === 'course-telehealth-foundations'));
   const betaUser = await signIn(app, 'student@fictional-beta.invalid');
   assert.equal((await alphaUser.agent.get('/api/nursing/courses/course-beta-secret/details')).status, 404);
   assert.equal((await betaUser.agent.get('/api/nursing/courses/course-alpha-proof/details')).status, 404);

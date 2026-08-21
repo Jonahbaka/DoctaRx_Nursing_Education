@@ -1813,7 +1813,7 @@ function CoursesSection({ seed, role, session }) {
           <CardTitle className="text-xl tracking-normal">Lessons</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Lessons table">
             <table className="w-full min-w-[680px] text-left text-sm">
               <thead className="border-b border-slate-200 text-slate-500 dark:border-slate-800 dark:text-slate-400">
                 <tr>

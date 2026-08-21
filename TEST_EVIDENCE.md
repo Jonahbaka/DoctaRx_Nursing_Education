@@ -1,23 +1,17 @@
 # Test Evidence
 
-Evidence date: 2026-08-18. Runtime: Node.js 22.12.0, npm 10.9.0. The package requires Node 20.19+; CI should use a currently supported patched Node release.
+Evidence date: 2026-08-21. Runtime: Node.js 20.19.0, npm 10.8.x, PostgreSQL 16, Next.js 15.5.23. The authoritative release run is linked from PR #1 and must be green for the exact merged head.
 
-| Command | Result |
+| Gate | Evidence |
 |---|---|
-| `npm ci` | Clean dependency installation completed during remediation. |
-| `npm audit` | Exit 0; 0 vulnerabilities. |
-| `npm audit --omit=dev` | Exit 0; 0 vulnerabilities. |
-| `npm run lint` | Exit 0; no output/errors. |
-| `npm test` | Final exit 0; 28 tests passed, 0 failed. |
-| `npm run build` | Exit 0; Next.js 15.5.23 compiled and generated 37 static pages. |
-| `npm run test:bundle` | Exit 0; `Client bundle credential scan passed.` |
-| Local HTTP `/ng/nursing/login` | 200, 25,175-byte HTML response containing nursing content. |
-| Local development `/api/health` | `healthy` development service status while explicitly reporting database `healthy:false`, `configured:false`; production startup requires a database and was not claimed. |
+| Clean checkout | `npm ci`, high-severity audit, lint, 32 unit/integration tests, production build, and client-bundle credential scan |
+| PostgreSQL migration | Three ordered migrations including `1120_nursing_production_platform.sql`; second apply reports already-applied files; migration checksums are 64-character SHA-256 values |
+| Database behavior | Database-backed API proof, two-fictional-institution isolation, stable external user identity, restart readback, 16 concurrent normalized writes, and integration-readiness assertions |
+| Recovery | Pre-migration custom dump, populated custom dump, restore into a separate database, source/restored row and entity checksum diff, then complete database proof rerun against the restore |
+| External contracts | Tenant-scoped S3 presigning, scan-state authorization, PDF certificate generation and claims verification, LiveKit JWT creation, institution invoice initialization, ordered message events, and monitoring readiness |
+| Authenticated browser | Six professional roles on desktop Chromium and mobile Chromium; role route, session/bootstrap, persisted learner and lecturer writes, screenshots, and runtime-error collection |
+| Accessibility | axe-core WCAG 2 A/AA and WCAG 2.1 A/AA rules on every authenticated role/device case |
 
-The suite covers signed-cookie tamper rejection, all eight roles, student answer/record redaction, role authorization, persistence/readback in the test store, messages, waiting rooms, office hours, assignments, lessons, progress, simulations, logbook, payments, timeline, medication education and source sanitization.
+The unit suite covers DailyMed normalization and sanitization, signed-cookie tamper rejection, eight professional accounts, student record and answer redaction, role authorization, tenant isolation, messaging integrity, waiting rooms, office hours, assignments, lessons, progress, simulations, logbooks, payments, certificates, course catalogue and learner engagement, and grounded-assistant safety.
 
-## Unproven gates
-
-No PostgreSQL server was supplied, so migrations, database-backed concurrent writes, restart persistence, backup/restore and cross-institution SQL/object attacks were not run. No authenticated browser, mobile/WCAG, object-storage, payment, video, certificate-PDF, monitoring or production startup soak evidence exists. These are blockers.
-
-The in-app browser runtime could not initialize because its local assets were unavailable, so no screenshots or interactive browser passes are claimed.
+CI retains PostgreSQL recovery logs/dumps/reconciliation JSON and Playwright reports, screenshots, videos, and traces as GitHub Actions artifacts for 14 days.

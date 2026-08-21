@@ -215,7 +215,7 @@ function normalizePhone(value) {
 function mapDatabaseUser(row) {
   if (!row) return null;
   return {
-    id: row.id,
+    id: row.external_key || String(row.id),
     email: row.email,
     firstName: row.first_name,
     lastName: row.last_name,
@@ -235,7 +235,7 @@ function mapDatabaseUser(row) {
 
 async function findDatabaseUser({ email, id }) {
   if (!pool) return null;
-  const condition = email ? 'LOWER(u.email) = LOWER($1)' : 'u.id::text = $1';
+  const condition = email ? 'LOWER(u.email) = LOWER($1)' : '(u.external_key = $1 OR u.id::text = $1)';
   const value = email || id;
   const result = await pool.query(
     `SELECT u.*, i.external_key AS institution_external_key,
