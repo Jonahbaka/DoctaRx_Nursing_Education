@@ -151,7 +151,7 @@ jobs:
       - name: Install application and build dependencies
         run: npm ci --include=dev
       - name: Install pinned browser test harness
-        run: npm install --no-save --package-lock=false @playwright/test@1.55.1 @axe-core/playwright@4.10.2
+        run: npm install --include=dev --no-save --package-lock=false @playwright/test@1.55.1 @axe-core/playwright@4.10.2
       - run: npx playwright install --with-deps chromium
       - run: npm run migrate
       - run: npm run seed
