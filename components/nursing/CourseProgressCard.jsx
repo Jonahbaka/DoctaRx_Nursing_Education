@@ -33,7 +33,7 @@ export default function CourseProgressCard({ course, selected, onSelect, imageSr
               <span>Progress</span>
               <span>{course.completionRate}%</span>
             </div>
-            <Progress value={course.completionRate} />
+            <Progress value={course.completionRate} aria-label={`${course.title} course progress`} />
           </div>
           <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
             <CheckCircle className="h-4 w-4 text-emerald-700" />

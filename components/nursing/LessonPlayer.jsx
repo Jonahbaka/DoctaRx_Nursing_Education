@@ -20,8 +20,11 @@ export default function LessonPlayer({ course, lessons, completedLessonIds, canC
   useEffect(() => {
     setNote(currentActivity?.note || '');
     setResumeSeconds(currentActivity?.resumeSeconds || 0);
-    setSaved(false);
   }, [activeLessonId, currentActivity?.note, currentActivity?.resumeSeconds]);
+
+  useEffect(() => {
+    setSaved(false);
+  }, [activeLessonId]);
 
   async function saveEngagement(patch = {}) {
     if (!activeLesson || !onSaveEngagement) return;
@@ -62,7 +65,7 @@ export default function LessonPlayer({ course, lessons, completedLessonIds, canC
               <span>Course progress</span>
               <span>{percent}%</span>
             </div>
-            <Progress value={percent} className="bg-slate-800" />
+            <Progress value={percent} className="bg-slate-800" aria-label="Course progress" />
           </div>
           {activeLesson?.transcript || activeLesson?.captionsText ? (
             <details className="mt-4 rounded-lg border border-white/10 bg-slate-900 p-3 text-sm text-slate-200">
