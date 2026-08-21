@@ -1,0 +1,168 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, codex/production-readiness-20260818]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nursing-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: 20.19.0
+  NURSING_TEST_ACCOUNT_PASSWORD: DatabaseProof!2026
+  NURSING_SESSION_SECRET: ci-only-nursing-session-secret-2026-change-me
+  NURSING_S3_BUCKET: fictional-nursing-ci-objects
+  NURSING_S3_REGION: us-east-1
+  NURSING_OBJECT_SCAN_MODE: s3-tag
+  AWS_ACCESS_KEY_ID: TESTACCESSKEYONLY
+  AWS_SECRET_ACCESS_KEY: TESTSECRETKEYONLYTESTSECRETKEYONLY
+  NURSING_LIVEKIT_URL: wss://livekit.fictional.invalid
+  NURSING_LIVEKIT_API_KEY: fictional-ci-key
+  NURSING_LIVEKIT_API_SECRET: fictional-ci-secret-at-least-32-characters
+  NURSING_INSTITUTION_BILLING_MODE: invoice
+  NURSING_MONITORING_MODE: cloudwatch
+  NURSING_METRICS_TOKEN: fictional-ci-metrics-token
+
+jobs:
+  clean-checkout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+      - run: npm run test:bundle
+
+  postgresql-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: nursing
+          POSTGRES_PASSWORD: nursing
+          POSTGRES_DB: nursing_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nursing -d nursing_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://nursing:nursing@127.0.0.1:5432/nursing_test
+      PGPASSWORD: nursing
+      PGHOST: 127.0.0.1
+      PGUSER: nursing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Capture pre-migration backup
+        run: pg_dump --format=custom --file=pre-migration.dump nursing_test
+      - name: Apply immutable migrations twice
+        run: |
+          npm run migrate | tee migration-first.log
+          npm run migrate | tee migration-second.log
+          grep -q "already applied" migration-second.log
+      - name: Seed fictional accounts
+        run: npm run seed
+      - name: Database-backed API, isolation, restart, concurrency, and integration proof
+        run: npm run test:db | tee database-proof.log
+      - name: Capture populated backup
+        run: pg_dump --format=custom --file=populated.dump nursing_test
+      - name: Restore to a separate database
+        run: |
+          createdb nursing_restore
+          pg_restore --exit-on-error --no-owner --dbname=nursing_restore populated.dump
+      - name: Reconcile source and restored rows and checksums
+        shell: bash
+        run: |
+          query="SELECT jsonb_build_object('migrations',(SELECT count(*) FROM nursing_migrations),'entities',(SELECT count(*) FROM nursing_platform_entities),'metadata',(SELECT count(*) FROM nursing_platform_metadata),'storage',(SELECT count(*) FROM nursing_storage_objects),'certificates',(SELECT count(*) FROM nursing_verifiable_certificates),'entity_checksum',(SELECT md5(COALESCE(string_agg(tenant_key||':'||collection_key||':'||entity_key||':'||md5(payload::text),',' ORDER BY tenant_key,collection_key,entity_key),'')) FROM nursing_platform_entities))::text"
+          psql -d nursing_test -Atc "$query" > source-reconciliation.json
+          psql -d nursing_restore -Atc "$query" > restore-reconciliation.json
+          diff --strip-trailing-cr source-reconciliation.json restore-reconciliation.json
+          echo "NURSING_BACKUP_RESTORE=PASS"
+      - name: Rerun database proof against restored database
+        run: npm run test:db | tee restored-database-proof.log
+        env:
+          DATABASE_URL: postgresql://nursing:nursing@127.0.0.1:5432/nursing_restore
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nursing-postgresql-recovery-${{ github.run_id }}
+          path: |
+            *.log
+            *.json
+            *.dump
+          retention-days: 14
+
+  authenticated-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    needs: [clean-checkout, postgresql-recovery]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: nursing
+          POSTGRES_PASSWORD: nursing
+          POSTGRES_DB: nursing_browser
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nursing -d nursing_browser"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://nursing:nursing@127.0.0.1:5432/nursing_browser
+      NODE_ENV: production
+      PORT: 3100
+      HOST: 127.0.0.1
+      BUILD_ID: nursing-ci-${{ github.sha }}
+      GIT_COMMIT: ${{ github.sha }}
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install application and build dependencies
+        run: npm ci --include=dev
+      - name: Install pinned browser test harness
+        run: npm install --include=dev --no-save --package-lock=false @playwright/test@1.55.1 @axe-core/playwright@4.10.2
+      - run: npx playwright install --with-deps chromium
+      - run: npm run migrate
+      - run: npm run seed
+      - run: npm run build
+      - name: Six-role desktop and mobile authenticated browser matrix
+        run: npm run test:e2e:nursing
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nursing-authenticated-browser-${{ github.run_id }}
+          path: |
+            playwright-report
+            test-results
+          retention-days: 14

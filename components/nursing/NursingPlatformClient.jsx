@@ -917,7 +917,7 @@ function NursingShell({ role, session, onLogout, activeTab, onTabChange, tabs, n
 
 export function NursingDashboardPage({ role, initialTab = 'overview' }) {
   const router = useRouter();
-  const seed = useMemo(() => getNursingSeedData(), []);
+  const [seed, setSeed] = useState(null);
   const [session, setSession] = useState(null);
   const [activeTab, setActiveTab] = useState(initialTab);
 
@@ -937,6 +937,9 @@ export function NursingDashboardPage({ role, initialTab = 'overview' }) {
           router.push(route);
           return;
         }
+        const bootstrap = await nursingApiRequest('/bootstrap');
+        if (!active) return;
+        setSeed(bootstrap.state);
         setSession(verifiedSession);
       } catch {
         clearSession();
@@ -953,7 +956,7 @@ export function NursingDashboardPage({ role, initialTab = 'overview' }) {
     setActiveTab(initialTab);
   }, [initialTab]);
 
-  if (!session) {
+  if (!session || !seed) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-950">
         <NursingLoadingState label="Opening nursing workspace" />
@@ -1533,14 +1536,26 @@ function CoursesSection({ seed, role, session }) {
   const [courses, setCourses] = useState(seed.courses);
   const [lessons, setLessons] = useState(seed.lessons);
   const [progress, setProgress] = useState(seed.lessonProgress);
+  const [activities, setActivities] = useState(seed.learnerActivities || []);
   const [selectedCourseId, setSelectedCourseId] = useState(seed.courses[0]?.id);
+  const [catalogueQuery, setCatalogueQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
   const [title, setTitle] = useState('');
   const [lessonTitle, setLessonTitle] = useState('');
   const [lessonMinutes, setLessonMinutes] = useState(45);
+  const [assistantQuestion, setAssistantQuestion] = useState('');
+  const [assistantResponse, setAssistantResponse] = useState(null);
+  const [assistantBusy, setAssistantBusy] = useState(false);
   const [actionError, setActionError] = useState('');
   const canManage = canNursingRole(role, 'manageCourses');
   const canCompleteLesson = canNursingRole(role, 'completeLesson');
   const selectedCourse = courses.find((course) => course.id === selectedCourseId) || courses[0];
+  const categories = [...new Set(courses.map((course) => course.category).filter(Boolean))].sort();
+  const visibleCourses = courses.filter((course) => {
+    const query = catalogueQuery.trim().toLowerCase();
+    const haystack = `${course.code || ''} ${course.title || ''} ${course.description || ''} ${course.category || ''} ${course.level || ''}`.toLowerCase();
+    return (!query || haystack.includes(query)) && (!categoryFilter || course.category === categoryFilter);
+  });
   const courseSections = seed.courseSections.filter((section) => section.courseId === selectedCourse?.id);
   const courseLessons = lessons.filter((lesson) => lesson.courseId === selectedCourse?.id);
   const courseEnrollments = seed.courseEnrollments.filter((enrollment) => enrollment.courseId === selectedCourse?.id);
@@ -1619,6 +1634,37 @@ function CoursesSection({ seed, role, session }) {
     }
   }
 
+  async function saveEngagement(lesson, values) {
+    setActionError('');
+    try {
+      const response = await nursingApiRequest(`/lessons/${lesson.id}/engagement`, { method: 'PUT', session, body: values });
+      setActivities((current) => [response.activity, ...current.filter((item) => item.id !== response.activity.id)]);
+    } catch (error) {
+      setActionError(error.message);
+      throw error;
+    }
+  }
+
+  async function askAssistant(event) {
+    event.preventDefault();
+    if (!assistantQuestion.trim()) return;
+    setAssistantBusy(true);
+    setActionError('');
+    try {
+      const response = await nursingApiRequest('/assistant/ask', {
+        method: 'POST',
+        session,
+        body: { question: assistantQuestion, courseId: selectedCourse?.id },
+      });
+      setAssistantResponse(response.response);
+    } catch (error) {
+      setAssistantResponse(null);
+      setActionError(error.message);
+    } finally {
+      setAssistantBusy(false);
+    }
+  }
+
   return (
     <section>
       <SectionHeader
@@ -1626,6 +1672,26 @@ function CoursesSection({ seed, role, session }) {
         title="Courses, Lessons, and Progress"
       />
       <ActionError message={actionError} />
+      <Card className="mb-5 rounded-lg border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+        <CardHeader>
+          <CardTitle className="text-xl tracking-normal">Course catalogue</CardTitle>
+          <CardDescription>Search by course name, code, outcome, level, or category.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 sm:grid-cols-[1fr_260px_auto]">
+          <div>
+            <Label htmlFor="course-catalogue-search">Search courses</Label>
+            <Input id="course-catalogue-search" type="search" className="mt-1" value={catalogueQuery} onChange={(event) => setCatalogueQuery(event.target.value)} placeholder="Try telehealth, informatics, or documentation" />
+          </div>
+          <div>
+            <Label htmlFor="course-category-filter">Category</Label>
+            <select id="course-category-filter" className="mt-1 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-950" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
+              <option value="">All categories</option>
+              {categories.map((category) => <option key={category} value={category}>{category}</option>)}
+            </select>
+          </div>
+          <Button type="button" variant="outline" className="self-end" onClick={() => { setCatalogueQuery(''); setCategoryFilter(''); }}>Clear filters</Button>
+        </CardContent>
+      </Card>
       {canManage ? (
         <div className="mb-5">
           <CourseBuilder
@@ -1642,7 +1708,7 @@ function CoursesSection({ seed, role, session }) {
       ) : null}
       <div className="grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
         <div className="grid gap-3">
-          {courses.map((course, index) => (
+          {visibleCourses.map((course, index) => (
             <CourseProgressCard
               key={course.id}
               course={course}
@@ -1659,6 +1725,7 @@ function CoursesSection({ seed, role, session }) {
               <div>
                 <CardTitle className="text-xl tracking-normal">{selectedCourse?.title}</CardTitle>
                 <CardDescription>{selectedCourse?.description || 'Structured nursing course with tracked lessons, resources, and completion.'}</CardDescription>
+                {selectedCourse?.level || selectedCourse?.category ? <p className="mt-2 text-xs font-medium uppercase tracking-wide text-teal-700">{[selectedCourse.category, selectedCourse.level].filter(Boolean).join(' · ')}</p> : null}
               </div>
               <div className="flex gap-2">
                 {statusBadge(selectedCourse?.status)}
@@ -1675,6 +1742,7 @@ function CoursesSection({ seed, role, session }) {
                 </div>
               ))}
             </div>
+            {selectedCourse?.syllabus ? <div className="rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-800"><p className="font-semibold">Syllabus</p><p className="mt-1 whitespace-pre-wrap text-slate-600 dark:text-slate-300">{selectedCourse.syllabus}</p></div> : null}
 
             <div className="grid gap-3">
               {courseSections.map((section) => (
@@ -1712,15 +1780,40 @@ function CoursesSection({ seed, role, session }) {
           completedLessonIds={completedLessonIds}
           canCompleteLesson={canCompleteLesson}
           onComplete={completeLesson}
+          activities={activities}
+          onSaveEngagement={saveEngagement}
         />
       </div>
+
+      {canCompleteLesson ? (
+        <Card className="mt-5 rounded-lg border-teal-200 bg-teal-50/60 dark:border-teal-900 dark:bg-teal-950/20">
+          <CardHeader>
+            <CardTitle className="text-xl tracking-normal">Grounded nursing learning assistant</CardTitle>
+            <CardDescription>Answers use only course material assigned to you, include citations, and never reveal hidden assessment answers.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form className="grid gap-3" onSubmit={askAssistant}>
+              <Label htmlFor="nursing-assistant-question">Ask about this course</Label>
+              <Textarea id="nursing-assistant-question" rows={3} value={assistantQuestion} onChange={(event) => setAssistantQuestion(event.target.value)} placeholder="How should I structure remote triage documentation?" />
+              <Button type="submit" className="w-fit bg-teal-700 text-white hover:bg-teal-800" disabled={assistantBusy}>{assistantBusy ? 'Checking course material…' : 'Ask assistant'}</Button>
+            </form>
+            {assistantResponse ? (
+              <div role="status" className="mt-4 rounded-lg border border-teal-200 bg-white p-4 text-sm dark:border-teal-900 dark:bg-slate-950">
+                <p className="leading-6">{assistantResponse.answer}</p>
+                {assistantResponse.citations?.length ? <ul className="mt-3 grid gap-2">{assistantResponse.citations.map((citation) => <li key={citation.sourceId}><span className="font-semibold">[{citation.index}] {citation.title}</span><span className="block text-slate-500">{citation.excerpt}</span></li>)}</ul> : null}
+                <p className="mt-3 text-xs text-slate-500">{assistantResponse.safetyNotice}</p>
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card className="mt-5 rounded-lg border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
         <CardHeader>
           <CardTitle className="text-xl tracking-normal">Lessons</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Lessons table">
             <table className="w-full min-w-[680px] text-left text-sm">
               <thead className="border-b border-slate-200 text-slate-500 dark:border-slate-800 dark:text-slate-400">
                 <tr>

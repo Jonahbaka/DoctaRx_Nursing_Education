@@ -4,7 +4,7 @@ const path = require('node:path');
 const { beforeEach, test } = require('node:test');
 const request = require('supertest');
 const { createApiApp } = require('../server/app');
-const { resetForTests } = require('../server/services/nursingPlatformStore');
+const { mutateState, readState, resetForTests } = require('../server/services/nursingPlatformStore');
 const {
   NURSING_ROLES,
   canNursingRole,
@@ -12,7 +12,7 @@ const {
   getRoleDashboard,
 } = require('../lib/nursingEducationData');
 
-const PASSWORD = 'DemoPass!2026';
+const PASSWORD = process.env.NURSING_TEST_ACCOUNT_PASSWORD || 'DemoPass!2026';
 const accounts = {
   student: 'nursing.student.preview@uniabuja.edu.ng',
   lecturer: 'ifeoma.lecturer@uniabuja.demo',
@@ -110,6 +110,83 @@ test('all eight professional test accounts authenticate to their assigned role',
     assert.equal(user.status, 'active');
     assert.ok(user.institutionId);
   }
+});
+
+test('institution state mutations remain isolated across fictional tenants', async () => {
+  await mutateState('inst-fictional-alpha', (state) => {
+    state.courses.push({ id: 'course-alpha-only', institutionId: 'inst-fictional-alpha', title: 'Alpha course' });
+    return { saved: true };
+  });
+  await mutateState('inst-fictional-beta', (state) => {
+    state.courses.push({ id: 'course-beta-only', institutionId: 'inst-fictional-beta', title: 'Beta course' });
+    return { saved: true };
+  });
+
+  const alpha = await readState('inst-fictional-alpha');
+  const beta = await readState('inst-fictional-beta');
+  assert.equal(alpha.courses.some((course) => course.id === 'course-alpha-only'), true);
+  assert.equal(alpha.courses.some((course) => course.id === 'course-beta-only'), false);
+  assert.equal(beta.courses.some((course) => course.id === 'course-beta-only'), true);
+  assert.equal(beta.courses.some((course) => course.id === 'course-alpha-only'), false);
+});
+
+test('student bootstrap redacts assessment answers and other students records', async () => {
+  const { agent, user } = await signIn(accounts.student);
+  const response = await agent.get('/api/nursing/bootstrap');
+  assert.equal(response.status, 200, response.text);
+
+  const state = response.body.state;
+  assert.deepEqual(state.users.map((item) => item.id), [user.id]);
+  assert.ok(state.quizzes.length > 0);
+  assert.equal(state.quizzes.some((quiz) => quiz.questions.some((question) => 'correctIndex' in question)), false);
+  assert.equal(state.simulationCases.some((item) => 'expectedActions' in item || 'feedback' in item || 'score' in item), false);
+  assert.equal(state.grades.every((item) => item.studentId === user.id), true);
+  assert.equal(state.assignmentSubmissions.every((item) => item.studentId === user.id), true);
+  assert.equal(state.paymentRecords.every((item) => item.studentId === user.id), true);
+  assert.deepEqual(state.accessRequests, []);
+  assert.deepEqual(state.reports, []);
+  assert.equal('auditEvents' in state, false);
+});
+
+test('student resource reads enforce record ownership and reporting permissions', async () => {
+  const { agent, user } = await signIn(accounts.student);
+  const users = await agent.get('/api/nursing/users');
+  const grades = await agent.get('/api/nursing/grades');
+  const payments = await agent.get('/api/nursing/payments');
+  const quizzes = await agent.get('/api/nursing/quizzes');
+  const simulations = await agent.get('/api/nursing/simulations');
+  const reports = await agent.get('/api/nursing/reports');
+
+  assert.deepEqual(users.body.users.map((item) => item.id), [user.id]);
+  assert.equal(grades.body.grades.every((item) => item.studentId === user.id), true);
+  assert.equal(payments.body.payments.every((item) => item.studentId === user.id), true);
+  assert.equal(quizzes.body.quizzes.some((quiz) => quiz.questions.some((question) => 'correctIndex' in question)), false);
+  assert.equal(simulations.body.simulations.some((item) => 'expectedActions' in item || 'feedback' in item), false);
+  assert.equal(reports.status, 403);
+});
+
+test('message creation ignores forged participants and rejects unknown direct recipients', async () => {
+  const { agent, user } = await signIn(accounts.student);
+  const rejected = await agent.post('/api/nursing/messages').send({
+    threadId: 'notifications',
+    scope: 'user',
+    recipientId: 'user-from-another-institution',
+    participantIds: ['user-lecturer-ifeoma'],
+    body: 'Attempted forged direct message.',
+  });
+  assert.equal(rejected.status, 400);
+
+  const created = await agent.post('/api/nursing/messages').send({
+    threadId: 'course-discussions',
+    scope: 'department',
+    recipientId: 'user-lecturer-ifeoma',
+    participantIds: ['user-from-another-institution'],
+    body: 'Department discussion message.',
+  });
+  assert.equal(created.status, 201, created.text);
+  assert.equal(created.body.message.senderId, user.id);
+  assert.equal(created.body.message.recipientId, null);
+  assert.deepEqual(created.body.message.participantIds, []);
 });
 
 test('public access requests validate contact details and persist', async () => {

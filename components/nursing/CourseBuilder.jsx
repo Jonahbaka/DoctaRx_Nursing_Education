@@ -2,6 +2,7 @@ import { Plus, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 export default function CourseBuilder({ title, onTitleChange, onCreateCourse, lessonTitle, onLessonTitleChange, lessonMinutes, onLessonMinutesChange, onAddLesson }) {
   return (
@@ -14,15 +15,24 @@ export default function CourseBuilder({ title, onTitleChange, onCreateCourse, le
       </CardHeader>
       <CardContent className="grid gap-4">
         <form className="grid gap-2 sm:grid-cols-[1fr_auto]" onSubmit={onCreateCourse}>
-          <Input value={title} onChange={(event) => onTitleChange(event.target.value)} placeholder="Course title" />
+          <div>
+            <Label htmlFor="course-builder-title" className="sr-only">Course title</Label>
+            <Input id="course-builder-title" value={title} onChange={(event) => onTitleChange(event.target.value)} placeholder="Course title" />
+          </div>
           <Button type="submit" className="bg-teal-700 text-white hover:bg-teal-800">
             <Plus className="mr-2 h-4 w-4" />
             Create Course
           </Button>
         </form>
         <form className="grid gap-2 sm:grid-cols-[1fr_120px_auto]" onSubmit={onAddLesson}>
-          <Input value={lessonTitle} onChange={(event) => onLessonTitleChange(event.target.value)} placeholder="Lesson title" />
-          <Input type="number" min="5" value={lessonMinutes} onChange={(event) => onLessonMinutesChange(event.target.value)} />
+          <div>
+            <Label htmlFor="course-builder-lesson-title" className="sr-only">Lesson title</Label>
+            <Input id="course-builder-lesson-title" value={lessonTitle} onChange={(event) => onLessonTitleChange(event.target.value)} placeholder="Lesson title" />
+          </div>
+          <div>
+            <Label htmlFor="course-builder-lesson-minutes" className="sr-only">Lesson duration in minutes</Label>
+            <Input id="course-builder-lesson-minutes" type="number" min="5" value={lessonMinutes} onChange={(event) => onLessonMinutesChange(event.target.value)} />
+          </div>
           <Button type="submit" variant="outline">
             <Plus className="mr-2 h-4 w-4" />
             Add Lesson
