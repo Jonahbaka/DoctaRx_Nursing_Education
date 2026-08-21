@@ -70,8 +70,8 @@ Product-facing nursing UI avoids provisional labels such as "Development Login",
 
 ## Preview Account
 
-- Student preview email: `nursing.student.preview@uniabuja.edu.ng`
-- Password: `DemoPass!2026`
+- Student preview email: `student@demo.doctarx.com`
+- Password: `Demo12345678!`
 - Expected route after sign in: `/ng/nursing/student`
 
 ## Verification

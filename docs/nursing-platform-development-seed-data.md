@@ -21,12 +21,12 @@ The command reads `lib/nursingEducationData.js` and writes deterministic develop
 
 ## Development Credentials
 
-Default password: `DemoPass!2026`
+Default developer-demo password: `Demo12345678!`
 
 Override with:
 
 ```bash
-NURSING_DEMO_PASSWORD='your-local-password' npm run seed:nursing
+NURSING_TEST_ACCOUNT_PASSWORD='your-local-password' npm run seed
 ```
 
 Credential examples are documented in `docs/nursing-platform-demo-credentials.md`.

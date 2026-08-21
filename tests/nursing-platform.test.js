@@ -12,16 +12,16 @@ const {
   getRoleDashboard,
 } = require('../lib/nursingEducationData');
 
-const PASSWORD = process.env.NURSING_TEST_ACCOUNT_PASSWORD || 'DemoPass!2026';
+const PASSWORD = process.env.NURSING_TEST_ACCOUNT_PASSWORD || 'Demo12345678!';
 const accounts = {
-  student: 'nursing.student.preview@uniabuja.edu.ng',
-  lecturer: 'ifeoma.lecturer@uniabuja.demo',
-  hod: 'hod.nursing@uniabuja.demo',
-  coordinator: 'clinical.coordinator@uniabuja.demo',
-  supervisor: 'preceptor.one@uniabuja.demo',
-  admin: 'nursing.admin@uniabuja.demo',
-  superAdmin: 'nursing.superadmin@doctarx.demo',
-  support: 'nursing.support@doctarx.demo',
+  student: 'student@demo.doctarx.com',
+  lecturer: 'teacher@demo.doctarx.com',
+  hod: 'hod@demo.doctarx.com',
+  coordinator: 'coordinator@demo.doctarx.com',
+  supervisor: 'supervisor@demo.doctarx.com',
+  admin: 'school@demo.doctarx.com',
+  superAdmin: 'admin@demo.doctarx.com',
+  support: 'support@demo.doctarx.com',
 };
 
 let app;
@@ -63,7 +63,7 @@ test('database shutdown is explicit and the production seed has no fallback pass
 
   assert.equal(typeof db.close, 'function');
   assert.match(seedScript, /NURSING_TEST_ACCOUNT_PASSWORD is required/);
-  assert.doesNotMatch(seedScript, /DemoPass!2026/);
+  assert.doesNotMatch(seedScript, /Demo12345678!/);
 });
 
 test('role permissions and dashboard metrics remain role-specific', () => {

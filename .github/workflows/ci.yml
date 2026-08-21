@@ -15,7 +15,7 @@ concurrency:
 
 env:
   NODE_VERSION: 20.19.0
-  NURSING_TEST_ACCOUNT_PASSWORD: DatabaseProof!2026
+  NURSING_TEST_ACCOUNT_PASSWORD: Demo12345678!
   NURSING_SESSION_SECRET: ci-only-nursing-session-secret-2026-change-me
   NURSING_S3_BUCKET: fictional-nursing-ci-objects
   NURSING_S3_REGION: us-east-1

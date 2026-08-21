@@ -6,7 +6,7 @@ const {
 
 function authenticateNursingTestAccount(email, password) {
   if (process.env.NODE_ENV === 'production') return null;
-  const expectedPassword = process.env.NURSING_TEST_ACCOUNT_PASSWORD || 'DemoPass!2026';
+  const expectedPassword = process.env.NURSING_TEST_ACCOUNT_PASSWORD || 'Demo12345678!';
   const user = findNursingUserByEmail(email);
   if (!user || password !== expectedPassword) return null;
   return {
