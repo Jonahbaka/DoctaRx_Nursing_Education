@@ -12,7 +12,7 @@ const {
   getRoleDashboard,
 } = require('../lib/nursingEducationData');
 
-const PASSWORD = 'DemoPass!2026';
+const PASSWORD = process.env.NURSING_TEST_ACCOUNT_PASSWORD || 'DemoPass!2026';
 const accounts = {
   student: 'nursing.student.preview@uniabuja.edu.ng',
   lecturer: 'ifeoma.lecturer@uniabuja.demo',

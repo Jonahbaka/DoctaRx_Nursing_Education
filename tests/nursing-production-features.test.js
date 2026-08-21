@@ -9,7 +9,7 @@ const { resetForTests } = require('../server/services/nursingPlatformStore');
 const { canonicalJson, liveKitToken, renderCertificatePdf } = require('../server/services/productionIntegrations');
 const { getNursingSeedData } = require('../lib/nursingEducationData');
 
-const PASSWORD = 'DemoPass!2026';
+const PASSWORD = process.env.NURSING_TEST_ACCOUNT_PASSWORD || 'DemoPass!2026';
 let app;
 
 beforeEach(() => {
